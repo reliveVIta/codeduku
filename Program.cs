@@ -56,9 +56,9 @@ namespace codeduke
             language_dicts["char_to_int"] = char_to_int_mapping;
             language_dicts["int_to_char"] = int_to_char_mapping;
 
-            int nrows = 12, ncols = 14, cellSize = 50;
-            int num_words = 3;
-            int num_limiters = 2; // need to account for red, green and blue overlaping
+            int nrows = 20, ncols = 20, cellSize = 50;
+            int num_words = 8;
+            int num_limiters = 5; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
             
@@ -152,6 +152,8 @@ namespace codeduke
         {
             Random rand = new Random();
             var inputs_added_copy = inputs_added;
+            List<bool> random_draw_right = new List<bool>(){true, false};
+            
 
             // Filter out words that have already been added and shuffle the remaining candidates
             var candidates = input_names
@@ -165,8 +167,7 @@ namespace codeduke
             // Try to place each candidate word
             foreach (var random_input in candidates)
             {
-                foreach (bool draw_right in new[] { true, false })
-                {
+                bool draw_right = random_draw_right[rand.Next() % 2];
                     // Determine valid placement bounds based on word orientation
                     int max_row = draw_right ? nrows : nrows - random_input.Length;
                     int max_col = draw_right ? ncols - random_input.Length : ncols;
@@ -238,7 +239,7 @@ namespace codeduke
                             return (true, phrase_info);
                         }
                     }
-                }
+                
             }
 
             // No valid position found
