@@ -57,8 +57,8 @@ namespace codeduke
             language_dicts["int_to_char"] = int_to_char_mapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int num_words = 8;
-            int num_limiters = 5; // need to account for red, green and blue overlaping
+            int num_words = 10;
+            int num_limiters = 8; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
             
@@ -168,78 +168,78 @@ namespace codeduke
             foreach (var random_input in candidates)
             {
                 bool draw_right = random_draw_right[rand.Next() % 2];
-                    // Determine valid placement bounds based on word orientation
-                    int max_row = draw_right ? nrows : nrows - random_input.Length;
-                    int max_col = draw_right ? ncols - random_input.Length : ncols;
+                // Determine valid placement bounds based on word orientation
+                int max_row = draw_right ? nrows : nrows - random_input.Length;
+                int max_col = draw_right ? ncols - random_input.Length : ncols;
 
-                    // Try every grid position within bounds
-                    for (int row = 0; row < max_row; row++)
+                // Try every grid position within bounds
+                for (int row = 0; row < max_row; row++)
+                {
+                    for (int col = 0; col < max_col; col++)
                     {
-                        for (int col = 0; col < max_col; col++)
+                        var phrase_info = new phrase_struct(random_input, row, col, draw_right);
+
+                        // Check basic placement rules
+                        if (!draw_string_check(cellData, phrase_info))
+                            continue;
+
+                        // Ensure there is at least one overlapping letter
+                        bool has_overlap = false;
+                        for (int j = 0; j < random_input.Length; j++)
                         {
-                            var phrase_info = new phrase_struct(random_input, row, col, draw_right);
-
-                            // Check basic placement rules
-                            if (!draw_string_check(cellData, phrase_info))
-                                continue;
-
-                            // Ensure there is at least one overlapping letter
-                            bool has_overlap = false;
-                            for (int j = 0; j < random_input.Length; j++)
+                            int r = row + (draw_right ? 0 : j);
+                            int c = col + (draw_right ? j : 0);
+                            if (!string.IsNullOrEmpty(cellData[r][c].letter) &&
+                                cellData[r][c].letter.ToLower() == random_input[j].ToString().ToLower())
                             {
-                                int r = row + (draw_right ? 0 : j);
-                                int c = col + (draw_right ? j : 0);
-                                if (!string.IsNullOrEmpty(cellData[r][c].letter) &&
-                                    cellData[r][c].letter.ToLower() == random_input[j].ToString().ToLower())
+                                has_overlap = true;
+                                break;
+                            }
+                        }
+
+                        if (!has_overlap) continue;
+
+                        // Check for visual spacing conflicts (letters placed directly parallel)
+                        bool has_parallel_conflict = false;
+                        for (int j = 0; j < random_input.Length; j++)
+                        {
+                            int r = row + (draw_right ? 0 : j);
+                            int c = col + (draw_right ? j : 0);
+
+                            if (!string.IsNullOrEmpty(cellData[r][c].letter) &&
+                                cellData[r][c].letter == random_input[j].ToString())
+                            {
+                                continue;
+                            }
+
+                            if (draw_right)
+                            {
+                                if ((row > 0 && !string.IsNullOrEmpty(cellData[row - 1][c].letter)) ||
+                                    (row < nrows - 1 && !string.IsNullOrEmpty(cellData[row + 1][c].letter)))
                                 {
-                                    has_overlap = true;
+                                    has_parallel_conflict = true;
                                     break;
                                 }
                             }
-
-                            if (!has_overlap) continue;
-
-                            // Check for visual spacing conflicts (letters placed directly parallel)
-                            bool has_parallel_conflict = false;
-                            for (int j = 0; j < random_input.Length; j++)
+                            else
                             {
-                                int r = row + (draw_right ? 0 : j);
-                                int c = col + (draw_right ? j : 0);
-
-                                if (!string.IsNullOrEmpty(cellData[r][c].letter) &&
-                                    cellData[r][c].letter == random_input[j].ToString())
+                                if ((col > 0 && !string.IsNullOrEmpty(cellData[r][col - 1].letter)) ||
+                                    (col < ncols - 1 && !string.IsNullOrEmpty(cellData[r][col + 1].letter)))
                                 {
-                                    continue;
-                                }
-
-                                if (draw_right)
-                                {
-                                    if ((row > 0 && !string.IsNullOrEmpty(cellData[row - 1][c].letter)) ||
-                                        (row < nrows - 1 && !string.IsNullOrEmpty(cellData[row + 1][c].letter)))
-                                    {
-                                        has_parallel_conflict = true;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    if ((col > 0 && !string.IsNullOrEmpty(cellData[r][col - 1].letter)) ||
-                                        (col < ncols - 1 && !string.IsNullOrEmpty(cellData[r][col + 1].letter)))
-                                    {
-                                        has_parallel_conflict = true;
-                                        break;
-                                    }
+                                    has_parallel_conflict = true;
+                                    break;
                                 }
                             }
-
-                            if (has_parallel_conflict) continue;
-
-                            // All checks passed; record the placement and return
-                            inputs_added.Add(random_input);
-                            return (true, phrase_info);
                         }
+
+                        if (has_parallel_conflict) continue;
+
+                        // All checks passed; record the placement and return
+                        inputs_added.Add(random_input);
+                        return (true, phrase_info);
                     }
-                
+                }
+            
             }
 
             // No valid position found
@@ -636,7 +636,7 @@ namespace codeduke
             }
             else if (current_color == "green" && target_color != "green")
             {
-                return current_color + "_" + target_color;
+                return target_color + "_" + current_color;
             }
             else if (current_color != "red" && current_color != "blue" && current_color != "green")
             {
