@@ -127,7 +127,6 @@ namespace codeduke
             // Create limiters
             for (int i = 0; i < num_limiters; i++)
             {
-                //create_limiter(ref cellData, canvas, language_dicts, colors, allow_shared_words: false, num_borders: 2, limiters_count: i, cellSize: cellSize);
                 create_limiter_2(cellData, canvas, colors, cellSize, language_dicts);
             }
 
