@@ -8,13 +8,16 @@ using SkiaSharp;
 
 namespace codeduke
 {
+    /// <summary>
+    /// Represents a single cell in the crossword grid, including its string, color, and position.
+    /// </summary>
     struct CellData
     {
-        public string letter;
-        public SKColor background;
-        public string color_name;
-        public int row;
-        public int col;
+        public string letter;         // The string stored in the cell.
+        public SKColor background;    // The background color of the cell (used for canvas).
+        public string color_name;     // The name of the color used (for tracking purposes).
+        public int row;               // row index of letter.
+        public int col;               // row index of letter.
 
         public CellData(string letter = "", SKColor? background = null, string color_name = "white", int row = 0, int col = 0)
         {
@@ -26,12 +29,16 @@ namespace codeduke
         }
     }
     
+    /// <summary>
+    /// Represents a word to be drawn on the grid, including its content, position, and orientation.
+    /// Created to simplify values being passed and returned by functions
+    /// </summary>
     struct phrase_struct
     {
-        public string phrase;
-        public int row;
-        public int col;
-        public bool draw_right;
+        public string phrase;    // The string stored in the cell.
+        public int row;          // row index of phrase.
+        public int col;          // col index of phrase.
+        public bool draw_right;  // Direction: true for horizontal, false for vertical.
 
         public phrase_struct(string phrase = "", int row = 0, int col = 0, bool draw_right = true)
         {
@@ -85,6 +92,19 @@ namespace codeduke
             }*/
         }
         
+        /// <summary>
+        /// Generates a crossword puzzle by placing words and limiters on the grid and drawing them on the canvas.
+        /// </summary>
+        /// <param name="cellData">The crossword grid to populate.</param>
+        /// <param name="input_names">List of possible input words.</param>
+        /// <param name="canvas">The canvas to draw the puzzle on.</param>
+        /// <param name="language_dicts">Dictionaries used for encoding letters (e.g., char-to-int mapping).</param>
+        /// <param name="colors">Mapping of color names to SKColor values.</param>
+        /// <param name="cellSize">Size in pixels of each grid cell.</param>
+        /// <param name="num_words">Number of words to place in the puzzle.</param>
+        /// <param name="num_limiters">Number of limiter elements to generate.</param>
+        /// <param name="difficulty">String indicating puzzle difficulty level.</param>
+        /// <returns>The updated crossword grid with placed words and limiters.</returns>
         static List<List<CellData>> create_puzzle(
             ref List<List<CellData>> cellData,
             List<string> input_names,
@@ -134,8 +154,8 @@ namespace codeduke
         }
         
         /// <summary>
-        /// Attempts to find a valid position to draw a randomly selected word from the input list onto the crossword grid.
-        /// Filters out already-added inputs, tries each candidate with both orientations, and checks for conflicts and visual constraints.
+        /// Attempts to find a valid position and draw a randomly selected word from the input list onto the crossword grid.
+        /// used for setting the "seed" of the crossword
         /// </summary>
         /// <param name="cellData">2D list representing the crossword grid.</param>
         /// <param name="input_names">List of all input words to possibly draw.</param>
@@ -252,6 +272,18 @@ namespace codeduke
             return (false, new phrase_struct());
         }
         
+        /// <summary>
+        /// Attempts to place a randomly selected word on the grid in a valid location and orientation.
+        /// Must overlap an existing word (key constraint)
+        /// </summary>
+        /// <param name="cellData">The crossword grid.</param>
+        /// <param name="input_names">List of available words to choose from.</param>
+        /// <returns>
+        /// A tuple containing:
+        /// - success (bool): True if a word was successfully placed.
+        /// - phraseInfo (phrase_struct): The placement information.
+        /// - inputsAdded (List<string>): List containing the added word if placement was successful.
+        /// </returns>
         public static (bool success, phrase_struct phraseInfo, List<string> inputsAdded) place_random_word(
             List<List<CellData>> cellData,
             List<string> input_names)
@@ -289,6 +321,15 @@ namespace codeduke
             return (false, new phrase_struct(), new List<string>());
         }
         
+        /// <summary>
+        /// Computes a limiter string based on the sum of encoded character values at specified grid positions.
+        /// </summary>
+        /// <param name="picked_border_index">List of (row, column) positions to include in the calculation.</param>
+        /// <param name="language_dicts">Dictionary containing character-to-integer and integer-to-character mappings.</param>
+        /// <param name="cellData">The crossword grid containing letters used for calculation.</param>
+        /// <returns>
+        /// A string starting with '=' followed by a character representing the encoded sum modulo 62.
+        /// </returns>
         static string calculate_limiter(List<(int, int)> picked_border_index, Dictionary<string, object> language_dicts, List<List<CellData>> cellData)
         {
             var char_to_int = (Dictionary<char, int>)language_dicts["char_to_int"];
