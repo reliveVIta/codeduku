@@ -285,8 +285,8 @@ namespace CodeDuku
             int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length;
             int maxCol = drawRight ? ncols - randomInput.Length : ncols - 1;
 
-            //var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight); //Todo: Remove
-            var phraseInfo = new PhraseStruct(randomInput, maxRow, maxCol, drawRight);
+            var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight); //Todo: Remove
+            //var phraseInfo = new PhraseStruct(randomInput, maxRow, maxCol, drawRight);
 
             if (DrawStringCheck(cellData, phraseInfo))
             {
