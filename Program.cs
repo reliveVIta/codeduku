@@ -57,8 +57,8 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 10;
-            int numLimiters = 8; // need to account for red, green and blue overlaping
+            int numWords = 2; // Number of words to place in the puzzle
+            int numLimiters = 1; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
             
@@ -116,27 +116,13 @@ namespace CodeDuku
 
             List<string> inputsAdded = new List<string>();
 
-            // Place the first random word
-            var placeResult = PlaceRandomWord(cellData, inputNames);
-            if (placeResult.Item1)
-            {
-                var phraseInfo = placeResult.Item2;
-                inputsAdded = new List<string> { phraseInfo.Phrase };
-                DrawString(ref cellData, phraseInfo, canvas, cellSize);
-            }
+            inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
 
-            // Place the remaining words
             for (int i = 0; i < numWords - 1; i++)
             {
-                var drawResult = GetRandomDraw(cellData, inputNames, ref inputsAdded);
-                if (drawResult.success)
-                {
-                    var phraseInfo = drawResult.phraseInfo;
-                    DrawString(ref cellData, phraseInfo, canvas, cellSize);
-                }
+                DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
-            // Create limiters
             for (int i = 0; i < numLimiters; i++)
             {
                 CreateLimiter(cellData, canvas, colors, cellSize, languageDicts);
@@ -157,10 +143,12 @@ namespace CodeDuku
         /// - success (bool): True if a word was successfully placed.
         /// - phraseInfo (phrase_struct): The placement information for the selected word.
         /// </returns>
-        private static (bool success, PhraseStruct phraseInfo) GetRandomDraw(
-            List<List<CellData>> cellData,
+        private static bool DrawRandomWord(
+            ref List<List<CellData>> cellData,
             List<string> inputNames,
-            ref List<string> inputsAdded)
+            ref List<string> inputsAdded,
+            SKCanvas canvas,
+            int cellSize)
         {
             Random rand = new Random();
             var inputsAddedCopy = inputsAdded; // Able to be used with a lambda expression
@@ -184,8 +172,8 @@ namespace CodeDuku
                 foreach (bool drawRight in drawRightValues)
                 {
                     // Determine valid placement bounds based on word orientation
-                    int maxRow = drawRight ? nrows : nrows - randomInput.Length;
-                    int maxCol = drawRight ? ncols - randomInput.Length : ncols;
+                    int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length;
+                    int maxCol = drawRight ? ncols - randomInput.Length : ncols - 1;
 
                     // Try every grid position within bounds
                     for (int row = 0; row < maxRow; row++)
@@ -193,7 +181,6 @@ namespace CodeDuku
                         for (int col = 0; col < maxCol; col++)
                         {
                             var phraseInfo = new PhraseStruct(randomInput, row, col, drawRight);
-
                             // Check basic placement rules
                             if (!DrawStringCheck(cellData, phraseInfo))
                                 continue;
@@ -249,14 +236,15 @@ namespace CodeDuku
 
                             if (hasParallelConflict) continue;
 
-                            // All checks passed; record the placement and return
+                            // All checks passed; record the placement, draw, and return
                             inputsAdded.Add(randomInput);
-                            return (true, phraseInfo);
+                            DrawString(ref cellData, phraseInfo, canvas, cellSize);
+                            return true;
                         }
                     }
                 }
             }
-            return (false, new PhraseStruct()); // No valid position found
+            return false; // No valid position found
         }
         
         /// <summary>
@@ -271,9 +259,11 @@ namespace CodeDuku
         /// - phraseInfo (phrase_struct): The placement information.
         /// - inputsAdded (List string): List containing the added word if placement was successful.
         /// </returns>
-        private static (bool success, PhraseStruct phraseInfo, List<string> inputsAdded) PlaceRandomWord(
-            List<List<CellData>> cellData,
-            List<string> inputNames)
+        private static List<string> DrawSeedWord(
+            ref List<List<CellData>> cellData,
+            List<string> inputNames,
+            SKCanvas canvas,
+            int cellSize)
         {
             Random rand = new();
             List<bool> options = new() { true, false };
@@ -288,21 +278,23 @@ namespace CodeDuku
                 : inputNames.Where(name => name.Length <= nrows).ToList();
 
             if (filteredInputNames.Count == 0)
-                return (false, new PhraseStruct(), new List<string>());
+                return new List<string>();
 
             string randomInput = filteredInputNames[rand.Next(filteredInputNames.Count)];
 
-            int maxRow = drawRight ? nrows : nrows - randomInput.Length;
-            int maxCol = drawRight ? ncols - randomInput.Length : ncols;
+            int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length;
+            int maxCol = drawRight ? ncols - randomInput.Length : ncols - 1;
 
-            var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight);
+            //var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight); //Todo: Remove
+            var phraseInfo = new PhraseStruct(randomInput, maxRow, maxCol, drawRight);
 
             if (DrawStringCheck(cellData, phraseInfo))
             {
-                return (true, phraseInfo, new List<string> { randomInput });
+                DrawString(ref cellData, phraseInfo, canvas, cellSize);
+                return new List<string> { randomInput };
             }
 
-            return (false, new PhraseStruct(), new List<string>());
+            return new List<string>();
         }
         
         /// <summary>
@@ -536,7 +528,7 @@ namespace CodeDuku
                 int c = phraseInfo.Col + (phraseInfo.DrawRight ? i : 0);
 
                 if (!string.IsNullOrEmpty(cellData[r][c].Letter) &&
-                    cellData[r][c].Letter != phraseInfo.Phrase[i].ToString())
+                    cellData[r][c].Letter.ToLower() != phraseInfo.Phrase[i].ToString().ToLower())
                     return false;
             }
             
