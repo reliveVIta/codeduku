@@ -57,7 +57,7 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 2; // Number of words to place in the puzzle
+            int numWords = 7; // Number of words to place in the puzzle
             int numLimiters = 1; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
@@ -120,6 +120,7 @@ namespace CodeDuku
 
             for (int i = 0; i < numWords - 1; i++)
             {
+                Console.WriteLine($"Attempting to draw word {i + 1} of {numWords - 1}");
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
@@ -172,9 +173,9 @@ namespace CodeDuku
                 foreach (bool drawRight in drawRightValues)
                 {
                     // Determine valid placement bounds based on word orientation
-                    int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length;
-                    int maxCol = drawRight ? ncols - randomInput.Length : ncols - 1;
-
+                    int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length + 1;
+                    int maxCol = drawRight ? ncols - randomInput.Length +1 : ncols - 1;
+                    Console.WriteLine($"Trying to place '{randomInput}' with maxRow: {maxRow}, maxCol: {maxCol}, orientation: {(drawRight ? "horizontal" : "vertical")}");
                     // Try every grid position within bounds
                     for (int row = 0; row < maxRow; row++)
                     {
@@ -199,8 +200,11 @@ namespace CodeDuku
                                 }
                             }
 
-                            if (!hasOverlap) continue;
-
+                            if (!hasOverlap)
+                            {
+                                Console.WriteLine($"No overlap found for '{randomInput}' at ({row}, {col}), orientation: {(drawRight ? "horizontal" : "vertical")}");
+                                continue;
+                            }
                             // Check for visual spacing conflicts (letters placed directly parallel)
                             bool hasParallelConflict = false;
                             for (int j = 0; j < randomInput.Length; j++)
@@ -285,8 +289,7 @@ namespace CodeDuku
             int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length;
             int maxCol = drawRight ? ncols - randomInput.Length : ncols - 1;
 
-            var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight); //Todo: Remove
-            //var phraseInfo = new PhraseStruct(randomInput, maxRow, maxCol, drawRight);
+            var phraseInfo = new PhraseStruct(randomInput, rand.Next(0, maxRow), rand.Next(0, maxCol), drawRight);
 
             if (DrawStringCheck(cellData, phraseInfo))
             {
@@ -531,7 +534,7 @@ namespace CodeDuku
                     cellData[r][c].Letter.ToLower() != phraseInfo.Phrase[i].ToString().ToLower())
                     return false;
             }
-            
+
             return true;
         }
 
