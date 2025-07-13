@@ -602,7 +602,7 @@ namespace CodeDuku
         /// <item><description>List of non-diagonal cross neighbors (cross_neighbors)</description></item>
         /// </list>
         /// </returns>
-        private static (List<CellData> diag_neighbors, List<CellData> cross_neighbors) get_neighbors(List<List<CellData>> cellData, CellData cell)
+        private static (List<CellData> diag_neighbors, List<CellData> cross_neighbors) GetNeighbors(List<List<CellData>> cellData, CellData cell)
         {
             // todo: modify to do somthing different if the cell passed in is default
             var diagNeighbors = new List<CellData>();
@@ -704,7 +704,7 @@ namespace CodeDuku
             cell.Background = darkColor;
             cell.ColorName = targetColor;
             
-            (List<CellData> diagNeighbors, List<CellData> crossNeighbors) = get_neighbors(cellData, possibleIndex);
+            (List<CellData> diagNeighbors, List<CellData> crossNeighbors) = GetNeighbors(cellData, possibleIndex);
 
             var validNeighborPositions = new List<(int row, int col)>();
             // Filter for valid neighbors
@@ -784,7 +784,7 @@ namespace CodeDuku
                     CellData currentCell = cellData[r][c];
                     bool isEmpty = string.IsNullOrEmpty(currentCell.Letter);
                     var (diagNeighbors, crossNeighbors) = isEmpty ?
-                        get_neighbors(cellData, currentCell) :
+                        GetNeighbors(cellData, currentCell) :
                         (new List<CellData> { new(), new(), new(), new() }, new List<CellData> { new(), new(), new(), new() });
                     var allNeighbors = diagNeighbors.Concat(crossNeighbors);
                     
