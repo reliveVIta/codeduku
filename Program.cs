@@ -187,22 +187,30 @@ namespace CodeDuku
                                 continue;
 
                             // Ensure there is at least one overlapping letter
+                            // Ensure there is no consecutive overlapping letters
                             bool hasOverlap = false;
+                            int consecutiveOverlap = 0;
+                            bool currentOverlap = false;
                             for (int j = 0; j < randomInput.Length; j++)
                             {
+                                currentOverlap = false;
                                 int r = row + (drawRight ? 0 : j);
                                 int c = col + (drawRight ? j : 0);
                                 if (!string.IsNullOrEmpty(cellData[r][c].Letter) &&
                                     cellData[r][c].Letter.ToLower() == randomInput[j].ToString().ToLower())
                                 {
                                     hasOverlap = true;
-                                    break;
+                                    currentOverlap = true;
+                                    consecutiveOverlap++;
                                 }
+                                if (consecutiveOverlap > 1)
+                                    break;
+                                else if (!currentOverlap)
+                                    consecutiveOverlap = Math.Max(0, consecutiveOverlap - 1);
                             }
 
-                            if (!hasOverlap)
+                            if (!hasOverlap || consecutiveOverlap > 1)
                             {
-                                Console.WriteLine($"No overlap found for '{randomInput}' at ({row}, {col}), orientation: {(drawRight ? "horizontal" : "vertical")}");
                                 continue;
                             }
                             // Check for visual spacing conflicts (letters placed directly parallel)
