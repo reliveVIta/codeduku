@@ -58,7 +58,7 @@ namespace CodeDuku
 
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 17; // Number of words to place in the puzzle
-            int numLimiters = 1; // need to account for red, green and blue overlaping
+            int numLimiters = 7; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
             
@@ -795,8 +795,8 @@ namespace CodeDuku
                         GetNeighbors(cellData, currentCell) :
                         (new List<CellData> { new(), new(), new(), new() }, new List<CellData> { new(), new(), new(), new() });
                     var allNeighbors = diagNeighbors.Concat(crossNeighbors);
-                    
-                    
+
+
                     switch (randomColor)
                     {
                         case "red":
@@ -816,8 +816,38 @@ namespace CodeDuku
                             break;
                     }
 
+                    var validNeighborPositions = new List<(int row, int col)>();
+                    // Filter for valid neighbors
+                    switch (randomColor)
+                    {
+                        case "red":
+                            validNeighborPositions = crossNeighbors
+                                .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
+                                .Select(n => (row: n.Row, col: n.Col))
+                                .ToList();
+                            break;
+                        case "blue":
+                            validNeighborPositions = diagNeighbors
+                                .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
+                                .Select(n => (row: n.Row, col: n.Col))
+                                .ToList();
+                            break;
+                        case "green":
+                            validNeighborPositions = diagNeighbors.Concat(crossNeighbors).ToList()
+                                .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
+                                .Select(n => (row: n.Row, col: n.Col))
+                                .ToList();
+                            break;
+                    }
 
-                    if (hasValidNeighbor)
+                    // Check if there is at least one lightgray neighbor
+                    // done to the limiter provides new information to the player
+                    // this is not the only condition for a limiter to provide new information
+                    // but including other limiter positions requires more complex logic
+                    bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
+                        cellData[pos.row][pos.col].ColorName == "lightgray");
+
+                    if (hasValidNeighbor && hasLightGrayNeighbor)
                     {
                         possibleLimiters.Add(cellData[r][c]);
                     }
