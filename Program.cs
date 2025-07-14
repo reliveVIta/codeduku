@@ -57,7 +57,7 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 7; // Number of words to place in the puzzle
+            int numWords = 17; // Number of words to place in the puzzle
             int numLimiters = 1; // need to account for red, green and blue overlaping
             string difficulty = "normal";
             string filename = "crossword.png";
@@ -239,6 +239,19 @@ namespace CodeDuku
                             }
 
                             if (hasParallelConflict) continue;
+
+                            // Check for cells before and after the word
+                            int beforeRow = row - (drawRight ? 0 : 1);
+                            int beforeCol = col - (drawRight ? 1 : 0);
+                            int afterRow = row + (drawRight ? 0 : randomInput.Length);
+                            int afterCol = col + (drawRight ? randomInput.Length : 0);
+                            bool beforeInBounds = beforeRow >= 0 && beforeCol >= 0 && beforeRow < nrows && beforeCol < ncols;
+                            bool afterInBounds = afterRow >= 0 && afterCol >= 0 && afterRow < nrows && afterCol < ncols;
+                            if ((beforeInBounds && !string.IsNullOrEmpty(cellData[beforeRow][beforeCol].Letter)) ||
+                                (afterInBounds && !string.IsNullOrEmpty(cellData[afterRow][afterCol].Letter)))
+                            {
+                                continue;
+                            }
 
                             // All checks passed; record the placement, draw, and return
                             inputsAdded.Add(randomInput);
