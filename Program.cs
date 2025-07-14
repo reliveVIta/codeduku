@@ -58,7 +58,7 @@ namespace CodeDuku
 
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 17; // Number of words to place in the puzzle
-            int numLimiters = 7; // need to account for red, green and blue overlaping
+            int numLimiters = 7;
             string difficulty = "normal";
             string filename = "crossword.png";
             
@@ -120,7 +120,6 @@ namespace CodeDuku
 
             for (int i = 0; i < numWords - 1; i++)
             {
-                Console.WriteLine($"Attempting to draw word {i + 1} of {numWords - 1}");
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
@@ -166,23 +165,18 @@ namespace CodeDuku
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
 
-            // Try to place each candidate word
             foreach (var randomInput in candidates)
             {
                 drawRightValues = drawRightValues.OrderBy(_ => rand.Next()).ToList();
                 foreach (bool drawRight in drawRightValues)
                 {
-                    // Determine valid placement bounds based on word orientation
                     int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length + 1;
                     int maxCol = drawRight ? ncols - randomInput.Length +1 : ncols - 1;
-                    Console.WriteLine($"Trying to place '{randomInput}' with maxRow: {maxRow}, maxCol: {maxCol}, orientation: {(drawRight ? "horizontal" : "vertical")}");
-                    // Try every grid position within bounds
                     for (int row = 0; row < maxRow; row++)
                     {
                         for (int col = 0; col < maxCol; col++)
                         {
                             var phraseInfo = new PhraseStruct(randomInput, row, col, drawRight);
-                            // Check basic placement rules
                             if (!DrawStringCheck(cellData, phraseInfo))
                                 continue;
 
@@ -261,7 +255,6 @@ namespace CodeDuku
                                 continue;
                             }
 
-                            // All checks passed; record the placement, draw, and return
                             inputsAdded.Add(randomInput);
                             DrawString(ref cellData, phraseInfo, canvas, cellSize);
                             return true;
@@ -447,6 +440,8 @@ namespace CodeDuku
             // Check bounds based on list dimensions
             if (row >= cellData.Count || col >= cellData[0].Count) return false;
 
+            int textSize = 18; // Default text size
+
             try
             {
                 var cell = cellData[row][col];
@@ -462,11 +457,9 @@ namespace CodeDuku
                 var textPaint = new SKPaint
                 {
                     Color = SKColors.Black,
-                    TextSize = 18,
                     IsAntialias = true,
-                    TextAlign = SKTextAlign.Center,
-                    Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold)
                 };
+                var font = new SKFont(SKTypeface.FromFamilyName("Arial", SKFontStyle.Bold), textSize);
 
                 // Cell position
                 int x = col * cellSize;
@@ -481,8 +474,8 @@ namespace CodeDuku
                 if (!string.IsNullOrEmpty(cell.Letter))
                 {
                     float textX = x + cellSize / 2f;
-                    float textY = y + cellSize / 2f + textPaint.TextSize / 3f;
-                    canvas.DrawText(cell.Letter, textX, textY, textPaint);
+                    float textY = y + cellSize / 2f + textSize / 3f;
+                    canvas.DrawText(cell.Letter, textX, textY, SKTextAlign.Center, font, textPaint);
                 }
 
                 return true;
