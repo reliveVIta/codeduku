@@ -75,31 +75,6 @@ namespace CodeDuku
 
     class Program
     {
-        /// <summary>
-        /// Checks if the puzzle is unique: no other combination of words can fit the placed pattern and satisfy all limiters and overlaps.
-        /// </summary>
-        /// <param name="cellData">The crossword grid.</param>
-        /// <param name="inputsAdded">List of placed words (PhraseStructs).</param>
-        /// <param name="limitersAdded">List of placed limiters.</param>
-        /// <param name="inputNames">All possible input words.</param>
-        /// <returns>True if the puzzle is unique, false otherwise.</returns>
-        private static bool IsPuzzleUnique(List<List<CellData>> cellData, List<PhraseStruct> inputsAdded, List<PlacedLimiter> limitersAdded, List<string> inputNames, Dictionary<string, object> languageDicts)
-        {
-            foreach (var placed in inputsAdded)
-            {
-                // Find all candidate words of the same length, excluding the placed word itself
-                int placedIndex = inputNames.FindIndex(w => w == placed.Phrase);
-                var candidates = inputNames.Where(w => w.Length == placed.Phrase.Length && w != placed.Phrase).ToList();
-                foreach (var candidate in candidates)
-                {
-                    int candidateIndex = inputNames.FindIndex(w => w == candidate);
-                    // Filter limitersAdded to only those where PhraseIndex matches the placed word
-                    var relevantLimiters = limitersAdded.Where(lim => lim.PhraseIndex == placedIndex).ToList();
-
-                }
-            }
-            return true;
-        }
         static void Main(string[] args)
         {
             Dictionary<char, int> charToIntMapping = new();
@@ -766,7 +741,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
         /// <param name="cellSize">The size of each cell on the canvas.</param>
         /// <param name="languageDicts">Dictionary containing language-specific data for limiter generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded)
+        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, List<string> inputList)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -810,12 +785,9 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                     break;
             }
 
-            // Assign limiter letter using calculate_limiter
-
             var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
             cell.Letter = limiterValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
-            // Add to limitersAdded
             int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
             var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex);
             limitersAdded.Add(placedLimiter);
@@ -870,7 +842,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                         GetNeighbors(cellData, currentCell) :
                         (new List<CellData> { new(), new(), new(), new() }, new List<CellData> { new(), new(), new(), new() });
                     var allNeighbors = diagNeighbors.Concat(crossNeighbors);
-
+                    bool uniqueSolution = false;
 
                     switch (randomColor)
                     {
@@ -922,89 +894,10 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
-                    if ((limitersAdded.Count == numLimiters - 1) && !uniquelySolvable) // final limiter
-                    {
-                        if (validNeighborPositions.Count > 0 && hasValidNeighbor && hasLightGrayNeighbor)
-                        {
-                            //Console.WriteLine("final loop and not uniquely solvable");
-                            List<string> matchesIntersections = new();
-                            int baseRow = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseRow;
-                            int baseCol = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseCol;
-                            int firstPhraseIndex = cellData[baseRow][baseCol].PhraseIndex;
-                            bool allSamePhrase = validNeighborPositions.All(pos => cellData[pos.row][pos.col].PhraseIndex == firstPhraseIndex);
-                            var limiterValueOriginal = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
-                            if (!allSamePhrase)
-                            {
-                                //Console.WriteLine("not all same phrase, skipping");
-                                continue;
-                            }
-                            var candidates = inputList.Where(w => w.Length == inputList[firstPhraseIndex].Length && w != inputList[firstPhraseIndex]).ToList();
-                            //Console.WriteLine("\nbaseRow: " + baseRow + "; baseCol: " + baseCol + "; baseWord: " + inputList[firstPhraseIndex]);
-                            //Console.WriteLine("candidates: " + string.Join(", ", candidates));
-                            //Console.WriteLine("At this point the intersection indexes can be compared and the limiters can be calculated");
-                            var cellDataCopy = cellData.Select(row => row.Select(cell => cell).ToList()).ToList();
+                    // return value is always true if (limitersAdded.Count != numLimiters - 1)
+                    uniqueSolution = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
 
-                            // Determine indexes in the word where there is an adjacent (non-empty) cell above/below (for horizontal)
-                            // or left/right (for vertical)
-                            List<int> constrainedPositions = new();
-                            for (int i = 0; i < inputList[firstPhraseIndex].Length; i++)
-                            {
-                                int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
-                                int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
-
-                                if (cellData[baseRow][baseCol].DrawRight) // Check above and below
-                                {
-                                    bool aboveHasValue = tmpRow > 0 && !string.IsNullOrEmpty(cellData[tmpRow - 1][tmpCol].Letter);
-                                    bool belowHasValue = tmpRow < cellData.Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow + 1][tmpCol].Letter);
-                                    if (aboveHasValue || belowHasValue)
-                                        constrainedPositions.Add(i);
-                                }
-                                else // Check left and right
-                                {
-                                    bool leftHasValue = tmpCol > 0 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol - 1].Letter);
-                                    bool rightHasValue = tmpCol < cellData[0].Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol + 1].Letter);
-                                    if (leftHasValue || rightHasValue)
-                                        constrainedPositions.Add(i);
-                                }
-                            }
-                            // For each candidate, check if the constrainedPositions match between the base word and the candidate
-                            foreach (var candidate in candidates)
-                            {
-                                bool allMatch = constrainedPositions.All(pos => candidate[pos] == inputList[firstPhraseIndex][pos]);
-                                if (allMatch)
-                                {
-                                    matchesIntersections.Add(candidate);
-                                    //Console.WriteLine("Candidate matches intersections. If it also matches limiter, then it is not unique: " + candidate);
-                                }
-                            }
-                            //Console.WriteLine(matchesIntersections.Count + " candidates found with same constrainedPositions as base word: " + string.Join(", ", matchesIntersections));
-
-                            foreach (var match in matchesIntersections)
-                            {
-                                for (int i = 0; i < match.Length; i++)
-                                {
-                                    int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
-                                    int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
-
-                                    var cellCopy = cellDataCopy[tmpRow][tmpCol];
-                                    cellCopy.Letter = match[i].ToString();
-                                    cellDataCopy[tmpRow][tmpCol] = cellCopy;
-                                }
-                                var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellDataCopy);
-                                //Console.WriteLine("Limiter value for candidate " + match + ": " + limiterValue);
-                                //Console.WriteLine("Limiter value for original candidate " + ": " + limiterValueOriginal);
-                                if (limiterValue == limiterValueOriginal)
-                                {
-                                    //Console.WriteLine("Candidate " + match + " is not unique, skipping");
-                                    continue;
-                                }
-                                uniquelySolvable = true;
-                            }
-                        }
-                    }
-
-
-                    if (hasValidNeighbor && hasLightGrayNeighbor)
+                    if (hasValidNeighbor && hasLightGrayNeighbor && uniqueSolution)
                     {
                         possibleLimiters.Add(cellData[r][c]);
                     }
@@ -1016,25 +909,115 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
 
             possibleLimiters = possibleLimiters.OrderBy(_ => rand.Next()).ToList();
 
-            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded);
+            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded, inputList);
         }
 
-                /// <summary>
-        /// Checks if a given phrase placement is unique in the crossword context.
+        /// <summary>
+        /// Checks whether the current limiter placement makes the solution uniquely solvable.
+        /// Updates the 'uniquelySolvable' flag accordingly.
+        /// Returns false if validation cannot proceed (e.g., not all neighbors are from the same phrase).
         /// </summary>
-        /// <param name="cellData">The crossword grid.</param>
-        /// <param name="phraseInfo">The phrase placement to check.</param>
-        /// <param name="inputNames">All possible input words.</param>
-        /// <returns>True if the phrase placement is unique, false otherwise.</returns>
+        private static bool VerifyUnique(
+            List<List<CellData>> cellData,
+            List<(int row, int col)> validNeighborPositions,
+            List<PlacedLimiter> limitersAdded,
+            int numLimiters,
+            ref bool uniquelySolvable,
+            Dictionary<string, object> languageDicts,
+            List<string> inputList,
+            bool hasValidNeighbor,
+            bool hasLightGrayNeighbor)
+        {
+            if ((limitersAdded.Count == numLimiters - 1) && !uniquelySolvable) // final limiter
+            {
+                if (validNeighborPositions.Count > 0 && hasValidNeighbor && hasLightGrayNeighbor)
+                {
+                    List<string> matchesIntersections = new();
+                    int baseRow = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseRow;
+                    int baseCol = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseCol;
+                    int firstPhraseIndex = cellData[baseRow][baseCol].PhraseIndex;
+                    bool allSamePhrase = validNeighborPositions.All(pos => cellData[pos.row][pos.col].PhraseIndex == firstPhraseIndex);
+                    var limiterValueOriginal = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
+                    if (!allSamePhrase)
+                    {
+                        return false;
+                    }
+                    var candidates = inputList.Where(w => w.Length == inputList[firstPhraseIndex].Length && w != inputList[firstPhraseIndex]).ToList();
+                    var cellDataCopy = cellData.Select(row => row.Select(cell => cell).ToList()).ToList();
+
+                    // Determine indexes in the word where there is an adjacent (non-empty) cell
+                    List<int> constrainedPositions = new();
+                    for (int i = 0; i < inputList[firstPhraseIndex].Length; i++)
+                    {
+                        int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                        int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                        if (cellData[baseRow][baseCol].DrawRight) // Check above and below
+                        {
+                            bool aboveHasValue = tmpRow > 0 && !string.IsNullOrEmpty(cellData[tmpRow - 1][tmpCol].Letter);
+                            bool belowHasValue = tmpRow < cellData.Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow + 1][tmpCol].Letter);
+                            if (aboveHasValue || belowHasValue)
+                                constrainedPositions.Add(i);
+                        }
+                        else // Check left and right
+                        {
+                            bool leftHasValue = tmpCol > 0 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol - 1].Letter);
+                            bool rightHasValue = tmpCol < cellData[0].Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol + 1].Letter);
+                            if (leftHasValue || rightHasValue)
+                                constrainedPositions.Add(i);
+                        }
+                    }
+                    // For each candidate, check if the constrainedPositions match between the base word and the candidate
+                    foreach (var candidate in candidates)
+                    {
+                        bool allMatch = constrainedPositions.All(pos => candidate[pos] == inputList[firstPhraseIndex][pos]);
+                        if (allMatch)
+                        {
+                            matchesIntersections.Add(candidate);
+                        }
+                    }
+
+                    // verify limiter value calculation at indexes results in different answer
+                    foreach (var match in matchesIntersections)
+                    {
+                        for (int i = 0; i < match.Length; i++)
+                        {
+                            int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                            int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                            var cellCopy = cellDataCopy[tmpRow][tmpCol];
+                            cellCopy.Letter = match[i].ToString();
+                            cellDataCopy[tmpRow][tmpCol] = cellCopy;
+                        }
+                        var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellDataCopy);
+                        if (limiterValue == limiterValueOriginal)
+                        {
+                            return false;
+                        }
+                        uniquelySolvable = true;
+                    }
+                }
+            }
+            return true;
+        }
+
+
+                /// <summary>
+                /// Checks if a given phrase placement is unique in the crossword context.
+                /// </summary>
+                /// <param name="cellData">The crossword grid.</param>
+                /// <param name="phraseInfo">The phrase placement to check.</param>
+                /// <param name="inputNames">All possible input words.</param>
+                /// <returns>True if the phrase placement is unique, false otherwise.</returns>
         private static bool IsLimiterUnique(List<List<CellData>> cellData, PhraseStruct phraseInfo, List<string> inputNames)
         {
             string baseWord = phraseInfo.Phrase;
             foreach (var candidate in inputNames)
             {
-            if (candidate.Length != baseWord.Length || candidate == baseWord)
-                continue;
+                if (candidate.Length != baseWord.Length || candidate == baseWord)
+                    continue;
 
-            // Add further uniqueness logic here as needed.
+                // Add further uniqueness logic here as needed.
             }
             // Placeholder: always returns true for now.
             return true;
