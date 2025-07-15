@@ -90,7 +90,8 @@ namespace CodeDuku
             int numWords = 17; // Number of words to place in the puzzle
             int numLimiters = 7;
             string difficulty = "normal";
-            string filename = "crossword.png";
+            string filename = "crossword";
+            string extension = ".png";
 
             List<List<CellData>> cellData = new();
 
@@ -103,7 +104,11 @@ namespace CodeDuku
             InitilizeCanvas(nrows, ncols, canvas, cellSize);
 
             CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numLimiters: numLimiters, difficulty: difficulty);
-            ExportPuzzle(bitmap, filename: filename);
+            ExportPuzzle(bitmap, filename: filename + extension);
+
+            ClearGridLetters(ref cellData, canvas, cellSize);
+            ExportPuzzle(bitmap, filename: filename + "_blank" + extension);
+
 
             /*for (int i = 0; i < 1; i++) //Example code for creating multiple puzzles
             {
@@ -168,6 +173,7 @@ namespace CodeDuku
             {
                 Console.WriteLine("Puzzle has a unique solution.");
             }
+
             return cellData;
         }
 
@@ -1035,6 +1041,37 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
             cellData = new List<List<CellData>>();
             inputsAdded = new List<PhraseStruct>();
         }
+
+        /// <summary>
+        /// Clears all letters from the grid (cellData) and updates the canvas,
+        /// except for cells where the letter starts with '=' (e.g., limiters).
+        /// </summary>
+        /// <param name="cellData">The 2D list representing the puzzle grid.</param>
+        /// <param name="canvas">The SKCanvas on which to redraw the cleared grid.</param>
+        /// <param name="cellSize">The size of each cell in pixels.</param>
+        private static void ClearGridLetters(ref List<List<CellData>> cellData, SKCanvas canvas, int cellSize)
+        {
+            int nrows = cellData.Count;
+            int ncols = cellData[0].Count;
+
+            for (int r = 0; r < nrows; r++)
+            {
+                for (int c = 0; c < ncols; c++)
+                {
+                    var cell = cellData[r][c];
+
+                    // Only clear the letter if it doesn't start with '='
+                    if (!string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith("="))
+                    {
+                        cell.Letter = "";
+                        cellData[r][c] = cell;
+
+                        ModifyCanvas(canvas, cellData, r, c, cellSize);
+                    }
+                }
+            }
+        }
+
 
         /// <summary>
         /// Determines whether a given word meets the required overlap criteria for limiter placement based on difficulty level.
