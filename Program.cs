@@ -9,17 +9,25 @@ namespace CodeDuku
     {
         public string Letter;         // The string stored in the cell.
         public SKColor Background;    // The background color of the cell (used for canvas).
-        public string ColorName;     // The name of the color used (for tracking purposes).
+        public string ColorName;      // The name of the color used (for tracking purposes).
         public int Row;               // row index of letter.
-        public int Col;               // row index of letter.
+        public int Col;               // col index of letter.
+        public int PhraseIndex;       // Index in inputNames for the string the cell is part of
+        public bool DrawRight;        // Direction: true for horizontal, false for vertical
+        public int BaseRow;           // Row index of the base (start) of the phrase
+        public int BaseCol;           // Col index of the base (start) of the phrase
 
-        public CellData(string letter = "", SKColor? background = null, string colorName = "white", int row = 0, int col = 0)
+        public CellData(string letter = "", SKColor? background = null, string colorName = "white", int row = 0, int col = 0, int phraseIndex = 0, bool drawRight = true, int baseRow = 0, int baseCol = 0)
         {
             Letter = letter;
             Background = background ?? SKColors.White;
             ColorName = colorName;
             Row = row;
             Col = col;
+            PhraseIndex = phraseIndex;
+            DrawRight = drawRight;
+            BaseRow = baseRow;
+            BaseCol = baseCol;
         }
     }
     
@@ -42,9 +50,56 @@ namespace CodeDuku
             DrawRight = drawRight;
         }
     }
+    
+    /// <summary>
+    /// Represents a limiter placed on the crossword grid, including its position, color, neighbor positions, and limiter value.
+    /// </summary>
+    struct PlacedLimiter
+    {
+        public int Row;
+        public int Col;
+        public string Color;
+        public List<(int row, int col)> NeighborPositions;
+        public string LimiterValue;
+        public int PhraseIndex;
+        public PlacedLimiter(int row, int col, string color, List<(int, int)> neighborPositions, string limiterValue, int phraseIndex)
+        {
+            Row = row;
+            Col = col;
+            Color = color;
+            NeighborPositions = neighborPositions;
+            LimiterValue = limiterValue;
+            PhraseIndex = phraseIndex;
+        }
+    }
 
     class Program
     {
+        /// <summary>
+        /// Checks if the puzzle is unique: no other combination of words can fit the placed pattern and satisfy all limiters and overlaps.
+        /// </summary>
+        /// <param name="cellData">The crossword grid.</param>
+        /// <param name="inputsAdded">List of placed words (PhraseStructs).</param>
+        /// <param name="limitersAdded">List of placed limiters.</param>
+        /// <param name="inputNames">All possible input words.</param>
+        /// <returns>True if the puzzle is unique, false otherwise.</returns>
+        private static bool IsPuzzleUnique(List<List<CellData>> cellData, List<PhraseStruct> inputsAdded, List<PlacedLimiter> limitersAdded, List<string> inputNames, Dictionary<string, object> languageDicts)
+        {
+            foreach (var placed in inputsAdded)
+            {
+                // Find all candidate words of the same length, excluding the placed word itself
+                int placedIndex = inputNames.FindIndex(w => w == placed.Phrase);
+                var candidates = inputNames.Where(w => w.Length == placed.Phrase.Length && w != placed.Phrase).ToList();
+                foreach (var candidate in candidates)
+                {
+                    int candidateIndex = inputNames.FindIndex(w => w == candidate);
+                    // Filter limitersAdded to only those where PhraseIndex matches the placed word
+                    var relevantLimiters = limitersAdded.Where(lim => lim.PhraseIndex == placedIndex).ToList();
+
+                }
+            }
+            return true;
+        }
         static void Main(string[] args)
         {
             Dictionary<char, int> charToIntMapping = new();
@@ -61,9 +116,9 @@ namespace CodeDuku
             int numLimiters = 7;
             string difficulty = "normal";
             string filename = "crossword.png";
-            
+
             List<List<CellData>> cellData = new();
-            
+
             using var bitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
             using var canvas = new SKCanvas(bitmap);
 
@@ -84,7 +139,7 @@ namespace CodeDuku
                 //export_puzzle(bitmap, filename: "tmp" + i.ToString() + ".png");
             }*/
         }
-        
+
         /// <summary>
         /// Generates a crossword puzzle by placing words and limiters on the grid and drawing them on the canvas.
         /// </summary>
@@ -114,7 +169,8 @@ namespace CodeDuku
             if (numLimiters <= 0)
                 throw new ArgumentException("numLimiters must be greater than 0");
 
-            List<string> inputsAdded = new List<string>();
+            List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
+            List<PlacedLimiter> limitersAdded = new List<PlacedLimiter>();
 
             inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
 
@@ -123,14 +179,23 @@ namespace CodeDuku
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
+            bool uniquelySolvable = false;
             for (int i = 0; i < numLimiters; i++)
             {
-                CreateLimiter(cellData, canvas, colors, cellSize, languageDicts);
+                CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames);
             }
 
+            if (!uniquelySolvable)
+            {
+                Console.WriteLine("WARNING: Puzzle may not have a unique solution.");
+            }
+            else
+            {
+                Console.WriteLine("Puzzle has a unique solution.");
+            }
             return cellData;
         }
-        
+
         /// <summary>
         /// Attempts to find a valid position and draw a randomly selected word from the input list onto the crossword grid.
         /// used for setting the "seed" of the crossword
@@ -146,19 +211,19 @@ namespace CodeDuku
         private static bool DrawRandomWord(
             ref List<List<CellData>> cellData,
             List<string> inputNames,
-            ref List<string> inputsAdded,
+            ref List<PhraseStruct> inputsAdded,
             SKCanvas canvas,
             int cellSize)
         {
             Random rand = new Random();
             var inputsAddedCopy = inputsAdded; // Able to be used with a lambda expression
-            List<bool> drawRightValues = new List<bool>(){true, false};
+            List<bool> drawRightValues = new List<bool>() { true, false };
             drawRightValues = drawRightValues.OrderBy(_ => rand.Next()).ToList();
-            
+
 
             // Filter out words that have already been added and shuffle the remaining candidates
             var candidates = inputNames
-                .Where(name => !inputsAddedCopy.Contains(name))
+                .Where(name => !inputsAddedCopy.Any(p => p.Phrase == name))
                 .OrderBy(_ => rand.Next())
                 .ToList();
 
@@ -171,7 +236,7 @@ namespace CodeDuku
                 foreach (bool drawRight in drawRightValues)
                 {
                     int maxRow = drawRight ? nrows - 1 : nrows - randomInput.Length + 1;
-                    int maxCol = drawRight ? ncols - randomInput.Length +1 : ncols - 1;
+                    int maxCol = drawRight ? ncols - randomInput.Length + 1 : ncols - 1;
                     for (int row = 0; row < maxRow; row++)
                     {
                         for (int col = 0; col < maxCol; col++)
@@ -255,8 +320,8 @@ namespace CodeDuku
                                 continue;
                             }
 
-                            inputsAdded.Add(randomInput);
-                            DrawString(ref cellData, phraseInfo, canvas, cellSize);
+                            inputsAdded.Add(phraseInfo);
+                            DrawString(ref cellData, phraseInfo, canvas, cellSize, inputNames);
                             return true;
                         }
                     }
@@ -264,7 +329,7 @@ namespace CodeDuku
             }
             return false; // No valid position found
         }
-        
+
         /// <summary>
         /// Attempts to place a randomly selected word on the grid in a valid location and orientation.
         /// Must overlap an existing word (key constraint)
@@ -277,7 +342,7 @@ namespace CodeDuku
         /// - phraseInfo (phrase_struct): The placement information.
         /// - inputsAdded (List string): List containing the added word if placement was successful.
         /// </returns>
-        private static List<string> DrawSeedWord(
+        private static List<PhraseStruct> DrawSeedWord(
             ref List<List<CellData>> cellData,
             List<string> inputNames,
             SKCanvas canvas,
@@ -296,7 +361,7 @@ namespace CodeDuku
                 : inputNames.Where(name => name.Length <= nrows).ToList();
 
             if (filteredInputNames.Count == 0)
-                return new List<string>();
+                return new List<PhraseStruct>();
 
             string randomInput = filteredInputNames[rand.Next(filteredInputNames.Count)];
 
@@ -307,13 +372,13 @@ namespace CodeDuku
 
             if (DrawStringCheck(cellData, phraseInfo))
             {
-                DrawString(ref cellData, phraseInfo, canvas, cellSize);
-                return new List<string> { randomInput };
+                DrawString(ref cellData, phraseInfo, canvas, cellSize, inputNames);
+                return new List<PhraseStruct> { phraseInfo };
             }
 
-            return new List<string>();
+            return new List<PhraseStruct>();
         }
-        
+
         /// <summary>
         /// Computes a limiter string based on the sum of encoded character values at specified grid positions.
         /// </summary>
@@ -380,7 +445,7 @@ namespace CodeDuku
                 canvas.DrawRect(rect, borderPaint);
             }
         }
-        
+
         /// <summary>
         /// Loads and returns a list of words from a text file, replacing 'ä' with 'a'.
         /// </summary>
@@ -406,21 +471,21 @@ namespace CodeDuku
             {
                 intToCharMapping.Add(total + (i - 48), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 48));
-                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i-48)));
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 48)));
             }
             total += (57 - 48) + 1;
             for (int i = 97; i <= 122; i++) // a - z
             {
                 intToCharMapping.Add(total + (i - 97), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 97));
-                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i-97)));
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 97)));
             }
             total += (90 - 65) + 1;
             for (int i = 65; i <= 90; i++) // A - Z
             {
                 intToCharMapping.Add(total + (i - 65), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 65));
-                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i-65)));
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 65)));
             }
         }
 
@@ -494,14 +559,16 @@ namespace CodeDuku
         /// <param name="phraseInfo">Word and position/orientation to draw.</param>
         /// <param name="canvas">The canvas to render on.</param>
         /// <param name="cellSize">Pixel size of each cell.</param>
-        private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct phraseInfo, SKCanvas canvas, int cellSize)
+private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct phraseInfo, SKCanvas canvas, int cellSize, List<string> inputNames)
         {
             if (!DrawStringCheck(cellData, phraseInfo))
             {
                 Console.WriteLine("Cannot draw string: does not fit or cells occupied.");
                 return;
             }
-            
+
+            // Find the phrase index in inputNames
+            int phraseIndex = inputNames.FindIndex(name => name == phraseInfo.Phrase);
             for (int i = 0; i < phraseInfo.Phrase.Length; i++)
             {
                 int r = phraseInfo.Row + (phraseInfo.DrawRight ? 0 : i);
@@ -511,7 +578,7 @@ namespace CodeDuku
                 string existingChar = cellData[r][c].Letter;
 
                 // Determine if the resulting character should be uppercase
-                bool shouldBeUpper = 
+                bool shouldBeUpper =
                     (!string.IsNullOrEmpty(newChar) && char.IsUpper(newChar[0])) ||
                     (!string.IsNullOrEmpty(existingChar) && char.IsUpper(existingChar[0]));
                 string finalChar = shouldBeUpper ? newChar.ToUpper() : newChar.ToLower();
@@ -521,12 +588,16 @@ namespace CodeDuku
                 cell.Letter = finalChar;
                 cell.Background = SKColors.LightGray;
                 cell.ColorName = "lightgray";
+                cell.PhraseIndex = phraseIndex;
+                cell.DrawRight = phraseInfo.DrawRight;
+                cell.BaseRow = phraseInfo.Row;
+                cell.BaseCol = phraseInfo.Col;
                 cellData[r][c] = cell;
 
                 ModifyCanvas(canvas, cellData, r, c, cellSize);
             }
         }
-        
+
         /// <summary>
         /// Checks if a word can be placed on the grid without conflicts.
         /// </summary>
@@ -595,9 +666,9 @@ namespace CodeDuku
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             using var stream = File.OpenWrite(filename);
             data.SaveTo(stream);
-            Console.WriteLine("Crossword saved as " +  filename);
+            Console.WriteLine("Crossword saved as " + filename);
         }
-        
+
         /// <summary>
         /// Retrieves the diagonal and non-diagonal (cross) neighbors of a given cell in the grid.
         /// For neighbors out of bounds, returns default CellData instances.
@@ -616,7 +687,7 @@ namespace CodeDuku
             // todo: modify to do somthing different if the cell passed in is default
             var diagNeighbors = new List<CellData>();
             var crossNeighbors = new List<CellData>();
-            
+
             // All 8 neighbor offsets: diagonals and crosses
             (int row, int col)[] offsets = {
                 (-1, -1), (-1, 0), (-1, 1),
@@ -631,7 +702,7 @@ namespace CodeDuku
 
                 bool inBounds = nr >= 0 && nr < cellData.Count && nc >= 0 && nc < cellData[0].Count;
                 var neighbor = inBounds ? cellData[nr][nc] : new CellData(); // default if not in bounds
-                
+
                 if (offsets[i].row != 0 && offsets[i].col != 0) // Diagonal neighbor
                 {
                     diagNeighbors.Add(string.IsNullOrEmpty(neighbor.Letter) || neighbor.Letter[0].Equals('=') ? new CellData() : neighbor);
@@ -644,7 +715,7 @@ namespace CodeDuku
 
             return (diagNeighbors, crossNeighbors);
         }
-        
+
         /// <summary>
         /// Calculates the resulting color based on the target color and the current color state.
         /// </summary>
@@ -683,7 +754,7 @@ namespace CodeDuku
             // fallback return original current_color if none of above matched
             return currentColor;
         }
-        
+
         /// <summary>
         /// Colors a given cell and its neighbors on the canvas according to the specified target color.
         /// </summary>
@@ -695,7 +766,7 @@ namespace CodeDuku
         /// <param name="cellSize">The size of each cell on the canvas.</param>
         /// <param name="languageDicts">Dictionary containing language-specific data for limiter generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts)
+        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -712,7 +783,7 @@ namespace CodeDuku
             CellData cell = cellData[possibleIndex.Row][possibleIndex.Col];
             cell.Background = darkColor;
             cell.ColorName = targetColor;
-            
+
             (List<CellData> diagNeighbors, List<CellData> crossNeighbors) = GetNeighbors(cellData, possibleIndex);
 
             var validNeighborPositions = new List<(int row, int col)>();
@@ -740,11 +811,14 @@ namespace CodeDuku
             }
 
             // Assign limiter letter using calculate_limiter
-            var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
-            
-            cell.Letter = limiterValue;
 
+            var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
+            cell.Letter = limiterValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
+            // Add to limitersAdded
+            int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
+            var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex);
+            limitersAdded.Add(placedLimiter);
             if (!ModifyCanvas(canvas, cellData, possibleIndex.Row, possibleIndex.Col, cellSize))
                 return false;
 
@@ -775,8 +849,8 @@ namespace CodeDuku
             }
             return true;
         }
-        
-        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts)
+
+        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, int numLimiters, ref bool uniquelySolvable, List<string> inputList)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -848,6 +922,88 @@ namespace CodeDuku
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
+                    if ((limitersAdded.Count == numLimiters - 1) && !uniquelySolvable) // final limiter
+                    {
+                        if (validNeighborPositions.Count > 0 && hasValidNeighbor && hasLightGrayNeighbor)
+                        {
+                            //Console.WriteLine("final loop and not uniquely solvable");
+                            List<string> matchesIntersections = new();
+                            int baseRow = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseRow;
+                            int baseCol = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseCol;
+                            int firstPhraseIndex = cellData[baseRow][baseCol].PhraseIndex;
+                            bool allSamePhrase = validNeighborPositions.All(pos => cellData[pos.row][pos.col].PhraseIndex == firstPhraseIndex);
+                            var limiterValueOriginal = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
+                            if (!allSamePhrase)
+                            {
+                                //Console.WriteLine("not all same phrase, skipping");
+                                continue;
+                            }
+                            var candidates = inputList.Where(w => w.Length == inputList[firstPhraseIndex].Length && w != inputList[firstPhraseIndex]).ToList();
+                            //Console.WriteLine("\nbaseRow: " + baseRow + "; baseCol: " + baseCol + "; baseWord: " + inputList[firstPhraseIndex]);
+                            //Console.WriteLine("candidates: " + string.Join(", ", candidates));
+                            //Console.WriteLine("At this point the intersection indexes can be compared and the limiters can be calculated");
+                            var cellDataCopy = cellData.Select(row => row.Select(cell => cell).ToList()).ToList();
+
+                            // Determine indexes in the word where there is an adjacent (non-empty) cell above/below (for horizontal)
+                            // or left/right (for vertical)
+                            List<int> constrainedPositions = new();
+                            for (int i = 0; i < inputList[firstPhraseIndex].Length; i++)
+                            {
+                                int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                                int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                                if (cellData[baseRow][baseCol].DrawRight) // Check above and below
+                                {
+                                    bool aboveHasValue = tmpRow > 0 && !string.IsNullOrEmpty(cellData[tmpRow - 1][tmpCol].Letter);
+                                    bool belowHasValue = tmpRow < cellData.Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow + 1][tmpCol].Letter);
+                                    if (aboveHasValue || belowHasValue)
+                                        constrainedPositions.Add(i);
+                                }
+                                else // Check left and right
+                                {
+                                    bool leftHasValue = tmpCol > 0 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol - 1].Letter);
+                                    bool rightHasValue = tmpCol < cellData[0].Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol + 1].Letter);
+                                    if (leftHasValue || rightHasValue)
+                                        constrainedPositions.Add(i);
+                                }
+                            }
+                            // For each candidate, check if the constrainedPositions match between the base word and the candidate
+                            foreach (var candidate in candidates)
+                            {
+                                bool allMatch = constrainedPositions.All(pos => candidate[pos] == inputList[firstPhraseIndex][pos]);
+                                if (allMatch)
+                                {
+                                    matchesIntersections.Add(candidate);
+                                    //Console.WriteLine("Candidate matches intersections. If it also matches limiter, then it is not unique: " + candidate);
+                                }
+                            }
+                            //Console.WriteLine(matchesIntersections.Count + " candidates found with same constrainedPositions as base word: " + string.Join(", ", matchesIntersections));
+
+                            foreach (var match in matchesIntersections)
+                            {
+                                for (int i = 0; i < match.Length; i++)
+                                {
+                                    int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                                    int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                                    var cellCopy = cellDataCopy[tmpRow][tmpCol];
+                                    cellCopy.Letter = match[i].ToString();
+                                    cellDataCopy[tmpRow][tmpCol] = cellCopy;
+                                }
+                                var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellDataCopy);
+                                //Console.WriteLine("Limiter value for candidate " + match + ": " + limiterValue);
+                                //Console.WriteLine("Limiter value for original candidate " + ": " + limiterValueOriginal);
+                                if (limiterValue == limiterValueOriginal)
+                                {
+                                    //Console.WriteLine("Candidate " + match + " is not unique, skipping");
+                                    continue;
+                                }
+                                uniquelySolvable = true;
+                            }
+                        }
+                    }
+
+
                     if (hasValidNeighbor && hasLightGrayNeighbor)
                     {
                         possibleLimiters.Add(cellData[r][c]);
@@ -860,20 +1016,41 @@ namespace CodeDuku
 
             possibleLimiters = possibleLimiters.OrderBy(_ => rand.Next()).ToList();
 
-            // Pass first possible limiter to color_limiter with "red"
-            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts);
+            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded);
         }
 
-        
+                /// <summary>
+        /// Checks if a given phrase placement is unique in the crossword context.
+        /// </summary>
+        /// <param name="cellData">The crossword grid.</param>
+        /// <param name="phraseInfo">The phrase placement to check.</param>
+        /// <param name="inputNames">All possible input words.</param>
+        /// <returns>True if the phrase placement is unique, false otherwise.</returns>
+        private static bool IsLimiterUnique(List<List<CellData>> cellData, PhraseStruct phraseInfo, List<string> inputNames)
+        {
+            string baseWord = phraseInfo.Phrase;
+            foreach (var candidate in inputNames)
+            {
+            if (candidate.Length != baseWord.Length || candidate == baseWord)
+                continue;
+
+            // Add further uniqueness logic here as needed.
+            }
+            // Placeholder: always returns true for now.
+            return true;
+        }
+
+
+
         /// <summary>
         /// Resets key variables to their initial state for puzzle generation.
         /// </summary>
         /// <param name="cellData">The crossword grid to be cleared and reset.</param>
         /// <param name="inputsAdded">The list of inputs that have already been added to the grid.</param>
-        private static void ResetVariables(ref List<List<CellData>> cellData, ref List<string> inputsAdded)
+        private static void ResetVariables(ref List<List<CellData>> cellData, ref List<PhraseStruct> inputsAdded)
         {
             cellData = new List<List<CellData>>();
-            inputsAdded = new List<string>();
+            inputsAdded = new List<PhraseStruct>();
         }
 
         /// <summary>
