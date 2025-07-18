@@ -99,9 +99,9 @@ namespace CodeDuku
             // difficulty for each limiter is randomly selected based on these weights
             var difficultyWeights = new Dictionary<string, float>
             {
-                { "beginner", 0.3f },
-                { "novice", 0.5f },
-                { "intermediate", 0.2f },
+                { "beginner", 1.0f },
+                { "novice", 0.0f },
+                { "intermediate", 0.0f },
                 { "expert", 0.0f },
                 { "master", 0.0f },
                 { "legendary", 0.0f }
@@ -179,6 +179,7 @@ namespace CodeDuku
 
             List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
             List<PlacedLimiter> limitersAdded = new List<PlacedLimiter>();
+            bool puzzleIsUniquelySolvable = true;
 
             inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
 
@@ -187,16 +188,17 @@ namespace CodeDuku
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
-            bool uniquelySolvable = false;
             for (int i = 0; i < numLimiters; i++)
             {
+                bool uniquelySolvable = false; // reset for each limiter. unnecessary.
                 // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
                 string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
                 Console.WriteLine($"Selected difficulty: {difficulty}");
                 CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames, difficulty);
+                puzzleIsUniquelySolvable = puzzleIsUniquelySolvable && uniquelySolvable;
             }
 
-            if (!uniquelySolvable)
+            if (!puzzleIsUniquelySolvable)
             {
                 Console.WriteLine("WARNING: Puzzle may not have a unique solution.");
             }
@@ -881,7 +883,6 @@ namespace CodeDuku
                         GetNeighbors(cellData, currentCell) :
                         (new List<CellData> { new(), new(), new(), new() }, new List<CellData> { new(), new(), new(), new() });
                     var allNeighbors = diagNeighbors.Concat(crossNeighbors);
-                    bool uniqueSolution = false;
                     var validNeighborPositions = new List<(int row, int col)>(); // Filter for valid neighbors
 
                     switch (randomColor)
@@ -922,7 +923,7 @@ namespace CodeDuku
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
-                    uniqueSolution = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
+                    uniquelySolvable = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
 
                     // Check if the cell meets the difficulty requirement of min neighbors
                     int minCells = 0;
@@ -930,7 +931,7 @@ namespace CodeDuku
                         throw new ArgumentException($"Invalid difficulty level: {difficulty}");
                     meetsDifficulty = minCells == validNeighborPositions.Count;
 
-                    if (hasValidNeighbor && hasLightGrayNeighbor && uniqueSolution && meetsDifficulty)
+                    if (hasValidNeighbor && hasLightGrayNeighbor && uniquelySolvable && meetsDifficulty)
                     {
                         possibleLimiters.Add(cellData[r][c]);
                     }
