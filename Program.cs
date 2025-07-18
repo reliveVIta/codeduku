@@ -62,7 +62,8 @@ namespace CodeDuku
         public List<(int row, int col)> NeighborPositions;
         public string LimiterValue;
         public int PhraseIndex;
-        public PlacedLimiter(int row, int col, string color, List<(int, int)> neighborPositions, string limiterValue, int phraseIndex)
+        public string Difficulty;
+        public PlacedLimiter(int row, int col, string color, List<(int, int)> neighborPositions, string limiterValue, int phraseIndex, string difficulty)
         {
             Row = row;
             Col = col;
@@ -70,6 +71,7 @@ namespace CodeDuku
             NeighborPositions = neighborPositions;
             LimiterValue = limiterValue;
             PhraseIndex = phraseIndex;
+            Difficulty = difficulty;
         }
     }
 
@@ -82,6 +84,7 @@ namespace CodeDuku
             Dictionary<string, object> languageDicts = new();
             List<string> inputNames = GetNames(@"../../../../../input_names.txt");
             Dictionary<string, SKColor> colors = new();
+            List<List<CellData>> cellData = new();
 
             languageDicts["charToInt"] = charToIntMapping;
             languageDicts["intToChar"] = intToCharMapping;
@@ -89,11 +92,20 @@ namespace CodeDuku
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 17; // Number of words to place in the puzzle
             int numLimiters = 7;
-            string difficulty = "normal";
             string filename = "crossword";
             string extension = ".png";
 
-            List<List<CellData>> cellData = new();
+            // key is difficulty level, value is weight
+            // difficulty for each limiter is randomly selected based on these weights
+            var difficultyWeights = new Dictionary<string, float>
+            {
+                { "beginner", 0.3f },
+                { "novice", 0.5f },
+                { "intermediate", 0.2f },
+                { "expert", 0.0f },
+                { "master", 0.0f },
+                { "legendary", 0.0f }
+            };
 
             using var bitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
             using var canvas = new SKCanvas(bitmap);
@@ -103,7 +115,7 @@ namespace CodeDuku
             define_colors(colors);
             InitilizeCanvas(nrows, ncols, canvas, cellSize);
 
-            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numLimiters: numLimiters, difficulty: difficulty);
+            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numLimiters: numLimiters, difficultyWeights: difficultyWeights);
             ExportPuzzle(bitmap, filename: filename + extension);
 
             ClearGridLetters(ref cellData, canvas, cellSize);
@@ -142,12 +154,28 @@ namespace CodeDuku
             int cellSize,
             int numWords,
             int numLimiters,
-            string difficulty)
+            Dictionary<string, float> difficultyWeights)
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
             if (numLimiters <= 0)
                 throw new ArgumentException("numLimiters must be greater than 0");
+            if (difficultyWeights.Sum(pair => pair.Value) != 1.0f)
+            {
+                throw new ArgumentException("Difficulty weights must sum to 1.0");
+            }
+
+            Random rand = new Random();
+            List<string> weightedPool = new();
+
+            foreach (var pair in difficultyWeights)
+            {
+                int count = (int)(pair.Value * 10);
+                for (int i = 0; i < count; i++)
+                {
+                    weightedPool.Add(pair.Key);
+                }
+            }
 
             List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
             List<PlacedLimiter> limitersAdded = new List<PlacedLimiter>();
@@ -162,7 +190,10 @@ namespace CodeDuku
             bool uniquelySolvable = false;
             for (int i = 0; i < numLimiters; i++)
             {
-                CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames);
+                // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
+                string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
+                Console.WriteLine($"Selected difficulty: {difficulty}");
+                CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames, difficulty);
             }
 
             if (!uniquelySolvable)
@@ -540,7 +571,7 @@ namespace CodeDuku
         /// <param name="phraseInfo">Word and position/orientation to draw.</param>
         /// <param name="canvas">The canvas to render on.</param>
         /// <param name="cellSize">Pixel size of each cell.</param>
-private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct phraseInfo, SKCanvas canvas, int cellSize, List<string> inputNames)
+        private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct phraseInfo, SKCanvas canvas, int cellSize, List<string> inputNames)
         {
             if (!DrawStringCheck(cellData, phraseInfo))
             {
@@ -747,7 +778,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
         /// <param name="cellSize">The size of each cell on the canvas.</param>
         /// <param name="languageDicts">Dictionary containing language-specific data for limiter generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, List<string> inputList)
+        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, List<string> inputList, string difficulty)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -795,7 +826,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
             cell.Letter = limiterValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
             int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
-            var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex);
+            var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex, difficulty);
             limitersAdded.Add(placedLimiter);
             if (!ModifyCanvas(canvas, cellData, possibleIndex.Row, possibleIndex.Col, cellSize))
                 return false;
@@ -828,7 +859,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
             return true;
         }
 
-        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, int numLimiters, ref bool uniquelySolvable, List<string> inputList)
+        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, int numLimiters, ref bool uniquelySolvable, List<string> inputList, string difficulty)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -837,6 +868,8 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
             Random rand = new();
             string randomColor = baseColors[rand.Next(3)];
             bool hasValidNeighbor = false;
+            bool meetsDifficulty = false;
+            var overlapLevels = new Dictionary<string, int> { ["beginner"] = 1, ["novice"] = 2, ["intermediate"] = 3, ["expert"] = 4, ["master"] = 5 , ["legendary"] = 6 };
 
             for (int r = 0; r < nrows; r++)
             {
@@ -849,6 +882,7 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                         (new List<CellData> { new(), new(), new(), new() }, new List<CellData> { new(), new(), new(), new() });
                     var allNeighbors = diagNeighbors.Concat(crossNeighbors);
                     bool uniqueSolution = false;
+                    var validNeighborPositions = new List<(int row, int col)>(); // Filter for valid neighbors
 
                     switch (randomColor)
                     {
@@ -856,39 +890,27 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                             hasValidNeighbor = crossNeighbors.Any(cell =>
                                 !string.IsNullOrEmpty(cell.Letter) &&
                                 !cell.Letter.StartsWith("="));
-                            break;
-                        case "blue":
-                            hasValidNeighbor = diagNeighbors.Any(cell =>
-                                !string.IsNullOrEmpty(cell.Letter) &&
-                                !cell.Letter.StartsWith("="));
-                            break;
-                        case "green":
-                            hasValidNeighbor = allNeighbors.Any(cell =>
-                                !string.IsNullOrEmpty(cell.Letter) &&
-                                !cell.Letter.StartsWith("="));
-                            break;
-                    }
-
-                    var validNeighborPositions = new List<(int row, int col)>();
-                    // Filter for valid neighbors
-                    switch (randomColor)
-                    {
-                        case "red":
                             validNeighborPositions = crossNeighbors
                                 .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
                                 .Select(n => (row: n.Row, col: n.Col))
                                 .ToList();
                             break;
                         case "blue":
+                            hasValidNeighbor = diagNeighbors.Any(cell =>
+                                !string.IsNullOrEmpty(cell.Letter) &&
+                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = diagNeighbors
-                                .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
-                                .Select(n => (row: n.Row, col: n.Col))
+                                .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
+                                .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
                             break;
                         case "green":
+                            hasValidNeighbor = allNeighbors.Any(cell =>
+                                !string.IsNullOrEmpty(cell.Letter) &&
+                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = diagNeighbors.Concat(crossNeighbors).ToList()
-                                .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
-                                .Select(n => (row: n.Row, col: n.Col))
+                                .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
+                                .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
                             break;
                     }
@@ -900,10 +922,15 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
-                    // return value is always true if (limitersAdded.Count != numLimiters - 1)
                     uniqueSolution = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
 
-                    if (hasValidNeighbor && hasLightGrayNeighbor && uniqueSolution)
+                    // Check if the cell meets the difficulty requirement of min neighbors
+                    int minCells = 0;
+                    if (!overlapLevels.TryGetValue(difficulty, out minCells))
+                        throw new ArgumentException($"Invalid difficulty level: {difficulty}");
+                    meetsDifficulty = minCells == validNeighborPositions.Count;
+
+                    if (hasValidNeighbor && hasLightGrayNeighbor && uniqueSolution && meetsDifficulty)
                     {
                         possibleLimiters.Add(cellData[r][c]);
                     }
@@ -915,13 +942,14 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
 
             possibleLimiters = possibleLimiters.OrderBy(_ => rand.Next()).ToList();
 
-            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded, inputList);
+            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded, inputList, difficulty);
         }
 
         /// <summary>
         /// Checks whether the current limiter placement makes the solution uniquely solvable.
         /// Updates the 'uniquelySolvable' flag accordingly.
         /// Returns false if validation cannot proceed (e.g., not all neighbors are from the same phrase).
+        /// return value is always true if (limitersAdded.Count != numLimiters - 1). Intended.
         /// </summary>
         private static bool VerifyUnique(
             List<List<CellData>> cellData,
@@ -1008,13 +1036,13 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
         }
 
 
-                /// <summary>
-                /// Checks if a given phrase placement is unique in the crossword context.
-                /// </summary>
-                /// <param name="cellData">The crossword grid.</param>
-                /// <param name="phraseInfo">The phrase placement to check.</param>
-                /// <param name="inputNames">All possible input words.</param>
-                /// <returns>True if the phrase placement is unique, false otherwise.</returns>
+        /// <summary>
+        /// Checks if a given phrase placement is unique in the crossword context.
+        /// </summary>
+        /// <param name="cellData">The crossword grid.</param>
+        /// <param name="phraseInfo">The phrase placement to check.</param>
+        /// <param name="inputNames">All possible input words.</param>
+        /// <returns>True if the phrase placement is unique, false otherwise.</returns>
         private static bool IsLimiterUnique(List<List<CellData>> cellData, PhraseStruct phraseInfo, List<string> inputNames)
         {
             string baseWord = phraseInfo.Phrase;
@@ -1071,58 +1099,5 @@ private static void DrawString(ref List<List<CellData>> cellData, PhraseStruct p
                 }
             }
         }
-
-
-        /// <summary>
-        /// Determines whether a given word meets the required overlap criteria for limiter placement based on difficulty level.
-        /// </summary>
-        /// <param name="inputNames">List of candidate words to compare against.</param>
-        /// <param name="baseWord">The word being evaluated for overlap.</param>
-        /// <param name="constrainedPositions">Positions in the word that must match across candidates.</param>
-        /// <param name="difficulty">The difficulty level ("beginner", "novice", "intermediate", "expert", or "master").</param>
-        /// <returns>True if the number of matching candidates meets the threshold; otherwise, false.</returns>
-        private static bool IsLimiterValidForDifficulty(
-            List<string> inputNames,
-            string baseWord,
-            List<int> constrainedPositions,
-            string difficulty)
-        {
-            int requiredOverlap = difficulty.ToLower() switch // number of other possibilities cut off
-            {
-                "beginner" => 0,
-                "novice" => 1,
-                "intermediate" => 2,
-                "expert" => 3,
-                "master" => 4,
-                _ => 0
-            };
-
-            // Filter input_names by length of baseWord
-            var filteredCandidates = inputNames.Where(candidate => candidate.Length == baseWord.Length);
-
-            int matchCount = 0;
-
-            foreach (var candidate in filteredCandidates)
-            {
-                bool matches = true;
-
-                foreach (var pos in constrainedPositions)
-                {
-                    if (candidate[pos] != baseWord[pos])
-                    {
-                        matches = false;
-                        break;
-                    }
-                }
-
-                if (matches) matchCount++;
-
-                if (matchCount > requiredOverlap)
-                    return true; // Enough overlap found, valid limiter
-            }
-
-            return requiredOverlap == 0;
-        }
-
     }
 }
