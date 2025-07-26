@@ -1245,11 +1245,11 @@ namespace CodeDuku
                         for (int c = 0; c < ncols; c++)
                         {
                             // Compare the letter content between working grid and original
-                            string workingLetter = workingGrid[r][c].Letter ?? "";
-                            string originalLetter = originalCellData[r][c].Letter ?? "";
+                            string workingLetter = workingGrid[r][c].Letter;
+                            string originalLetter = originalCellData[r][c].Letter;
 
                             // Skip hint cells (start with =) when comparing
-                            if (!originalLetter.StartsWith("=") && !workingLetter.StartsWith("="))
+                            if (!string.IsNullOrEmpty(originalLetter) && !originalLetter.StartsWith("="))
                             {
                                 if (!string.Equals(workingLetter, originalLetter, StringComparison.OrdinalIgnoreCase))
                                 {
@@ -1367,20 +1367,11 @@ namespace CodeDuku
                         }
                         else
                         {
-                            int minPossibleSum = sum;
-                            int maxPossibleSum = sum + (emptyCount * 61);
-
-                            bool possible = false;
-                            for (int testSum = minPossibleSum; testSum <= maxPossibleSum; testSum++)
-                            {
-                                if (testSum % 62 == expectedMod)
-                                {
-                                    possible = true;
-                                    break;
-                                }
-                            }
-
-                            if (!possible)
+                            int currentMod = sum % 62;
+                            int neededDiff = (expectedMod - currentMod + 62) % 62;
+                            int maxPossibleIncrease = emptyCount * 61;
+                            
+                            if (neededDiff > maxPossibleIncrease)
                             {
                                 allHintsOk = false;
                                 break;
