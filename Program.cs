@@ -1,6 +1,4 @@
-﻿using System.IO.Enumeration;
-using System.Text.Json;
-using SkiaSharp;
+﻿using SkiaSharp;
 
 namespace CodeDuku
 {
@@ -56,24 +54,24 @@ namespace CodeDuku
     }
     
     /// <summary>
-    /// Represents a limiter placed on the crossword grid, including its position, color, neighbor positions, and limiter value.
+    /// Represents a hint placed on the crossword grid, including its position, color, neighbor positions, and hint value.
     /// </summary>
-    struct PlacedLimiter
+    struct PlacedHint
     {
         public int Row;
         public int Col;
         public string Color;
         public List<(int row, int col)> NeighborPositions;
-        public string LimiterValue;
+        public string HintValue;
         public int PhraseIndex;
         public string Difficulty;
-        public PlacedLimiter(int row, int col, string color, List<(int, int)> neighborPositions, string limiterValue, int phraseIndex, string difficulty)
+        public PlacedHint(int row, int col, string color, List<(int, int)> neighborPositions, string hintValue, int phraseIndex, string difficulty)
         {
             Row = row;
             Col = col;
             Color = color;
             NeighborPositions = neighborPositions;
-            LimiterValue = limiterValue;
+            HintValue = hintValue;
             PhraseIndex = phraseIndex;
             Difficulty = difficulty;
         }
@@ -94,21 +92,21 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 22; // Number of words to place in the puzzle
-            int numLimiters = 20;
+            int numWords = 15; // Number of words to place in the puzzle
+            int numHints = 30;
             string filename = "crossword";
             string extension = ".png";
 
             // key is difficulty level, value is weight
-            // difficulty for each limiter is randomly selected based on these weights
+            // difficulty for each hint is randomly selected based on these weights
             var difficultyWeights = new Dictionary<string, float>
             {
                 { "beginner", 0.1f },     // 1 neighbor
                 { "novice", 0.3f },       // 2 neighbors
-                { "intermediate", 0.4f }, // 3 neighbors
-                { "expert", 0.1f },       // 4 neighbors
-                { "master", 0.1f },       // 5 neighbors
-                { "legendary", 0.0f }     // 6 neighbors
+                { "intermediate", 0.2f }, // 3 neighbors
+                { "expert", 0.15f },       // 4 neighbors
+                { "master", 0.15f },       // 5 neighbors
+                { "legendary", 0.1f }     // 6 neighbors
             };
 
             using var bitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
@@ -119,25 +117,15 @@ namespace CodeDuku
             DefineColors(colors);
             InitializeCanvas(nrows, ncols, canvas, cellSize);
 
-            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numLimiters: numLimiters, difficultyWeights: difficultyWeights, bitmap);
+            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, difficultyWeights: difficultyWeights, bitmap);
             ExportPuzzle(bitmap, filename: filename + extension);
 
             ClearGridLetters(ref cellData, canvas, cellSize);
             ExportPuzzle(bitmap, filename: filename + "_blank" + extension);
-
-
-            /*for (int i = 0; i < 1; i++) //Example code for creating multiple puzzles
-            {
-                reset_variables(ref cellData, ref inputs_added);
-                initialize_grid(ref cellData, nrows, ncols); //proper error handling is needed
-                initilize_canvas(nrows, ncols, canvas, cellSize);
-                create_puzzle(ref cellData, input_names, canvas, language_dicts, colors, cellSize, num_words: num_words, num_limiters: num_limiters, difficulty: difficulty);
-                //export_puzzle(bitmap, filename: "tmp" + i.ToString() + ".png");
-            }*/
         }
 
         /// <summary>
-        /// Generates a crossword puzzle by placing words and limiters on the grid and drawing them on the canvas.
+        /// Generates a crossword puzzle by placing words and Hints on the grid and drawing them on the canvas.
         /// </summary>
         /// <param name="cellData">The crossword grid to populate.</param>
         /// <param name="inputNames">List of possible input words.</param>
@@ -146,9 +134,9 @@ namespace CodeDuku
         /// <param name="colors">Mapping of color names to SKColor values.</param>
         /// <param name="cellSize">Size in pixels of each grid cell.</param>
         /// <param name="numWords">Number of words to place in the puzzle.</param>
-        /// <param name="numLimiters">Number of limiter elements to generate.</param>
+        /// <param name="numHints">Number of Hints to generate.</param>
         /// <param name="difficulty">String indicating puzzle difficulty level.</param>
-        /// <returns>The updated crossword grid with placed words and limiters.</returns>
+        /// <returns>The updated crossword grid with placed words and hints.</returns>
         private static List<List<CellData>> CreatePuzzle(
             ref List<List<CellData>> cellData,
             List<string> inputNames,
@@ -157,14 +145,14 @@ namespace CodeDuku
             Dictionary<string, SKColor> colors,
             int cellSize,
             int numWords,
-            int numLimiters,
+            int numHints,
             Dictionary<string, float> difficultyWeights,
             SKBitmap bitmap)
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
-            if (numLimiters <= 0)
-                throw new ArgumentException("numLimiters must be greater than 0");
+            if (numHints <= 0)
+                throw new ArgumentException("numHints must be greater than 0");
             if (difficultyWeights.Sum(pair => pair.Value) != 1.0f)
             {
                 throw new ArgumentException("Difficulty weights must sum to 1.0");
@@ -183,7 +171,7 @@ namespace CodeDuku
             }
 
             List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
-            List<PlacedLimiter> limitersAdded = new List<PlacedLimiter>();
+            List<PlacedHint> HintsAdded = new List<PlacedHint>();
             bool puzzleIsUniquelySolvable = true;
 
             inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
@@ -193,23 +181,23 @@ namespace CodeDuku
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
-            for (int i = 0; i < numLimiters; i++)
+            for (int i = 0; i < numHints; i++)
             {
-                bool uniquelySolvable = false; // reset for each limiter. unnecessary.
+                bool uniquelySolvable = false; // reset for each Hint. unnecessary.
                 // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
                 string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
                 Console.WriteLine($"Selected difficulty: {difficulty}");
                 
-                bool limiterCreated = false;
+                bool HintCreated = false;
                 string currentDifficulty = difficulty;
                 
-                while (!limiterCreated)
+                while (!HintCreated)
                 {
-                    limiterCreated = CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames, currentDifficulty);
+                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, currentDifficulty);
                     
-                    if (!limiterCreated)
+                    if (!HintCreated)
                     {
-                        Console.WriteLine($"Failed to create limiter with difficulty '{currentDifficulty}'. Stepping down difficulty and retrying...");
+                        Console.WriteLine($"Failed to create Hint with difficulty '{currentDifficulty}'. Stepping down difficulty and retrying...");
                         string steppedDownDifficulty = StepDownDifficulty(currentDifficulty);
                         if (steppedDownDifficulty != currentDifficulty)
                         {
@@ -218,7 +206,7 @@ namespace CodeDuku
                         }
                         else
                         {
-                            Console.WriteLine("Already at minimum difficulty level, skipping this limiter");
+                            Console.WriteLine("Already at minimum difficulty level, skipping this hint");
                             break;
                         }
                     }
@@ -233,13 +221,13 @@ namespace CodeDuku
             int j = 1;
             while (!puzzleIsUniquelySolvable)
             {
-                var returnValue = BackupGetAlternateSolutionsBackup(ref cellData, inputNames, canvas, cellSize, limitersAdded, j);
+                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, j);
                 puzzleIsUniquelySolvable = returnValue.isUnique;
-                var bestIndex = returnValue.bestLimiter.bestIndex;
-                var bestColor = returnValue.bestLimiter.color;
+                var bestIndex = returnValue.bestHint.bestIndex;
+                var bestColor = returnValue.bestHint.color;
                 if (!puzzleIsUniquelySolvable)
                 {
-                    ColorLimiter(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref limitersAdded, inputNames, "beginner");
+                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, "beginner");
                     UpdateFullCanvas(canvas, cellData, cellSize);
                     Console.WriteLine($"[Solver] Exported alternate solution to crossword_unique_step_{j}.png");
                     ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
@@ -256,8 +244,8 @@ namespace CodeDuku
         }
 
         /// <summary>
-        /// Steps down the difficulty level to a lower/easier level when limiter creation fails.
-        /// Used for fallback when no valid limiter positions are found for the current difficulty.
+        /// Steps down the difficulty level to a lower/easier level when hint creation fails.
+        /// Used for fallback when no valid hint positions are found for the current difficulty.
         /// </summary>
         /// <param name="currentDifficulty">The current difficulty level that failed.</param>
         /// <returns>
@@ -466,7 +454,7 @@ namespace CodeDuku
         }
 
         /// <summary>
-        /// Computes a limiter string based on the sum of encoded character values at specified grid positions.
+        /// Computes a hint string based on the sum of encoded character values at specified grid positions.
         /// </summary>
         /// <param name="pickedBorderIndex">List of (row, column) positions to include in the calculation.</param>
         /// <param name="languageDicts">Dictionary containing character-to-integer and integer-to-character mappings.</param>
@@ -474,7 +462,7 @@ namespace CodeDuku
         /// <returns>
         /// A string starting with '=' followed by a character representing the encoded sum modulo 62.
         /// </returns>
-        private static string CalculateLimiter(List<(int, int)> pickedBorderIndex, Dictionary<string, object> languageDicts, List<List<CellData>> cellData)
+        private static string CalculateHint(List<(int, int)> pickedBorderIndex, Dictionary<string, object> languageDicts, List<List<CellData>> cellData)
         {
             var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
             var intToChar = (Dictionary<int, char>)languageDicts["intToChar"];
@@ -514,7 +502,8 @@ namespace CodeDuku
             colors.Add("dark_green", new SKColor(132, 232, 110));
             colors.Add("red_blue", new SKColor(212, 168, 212));
             colors.Add("red_green", new SKColor(212, 212, 168));
-            colors.Add("blue_green", new SKColor(168, 212, 212));
+            ///colors.Add("blue_green", new SKColor(168, 212, 212));
+            colors.Add("blue_green", new SKColor(240, 199, 183));
             colors.Add("red_blue_green", new SKColor(197, 197, 197));
         }
 
@@ -566,7 +555,7 @@ namespace CodeDuku
                 charToIntMapping.Add((char)i, total + (i - 97));
                 // Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 97)));
             }
-            total += (90 - 65) + 1;
+            total += (122 - 97) + 1;
             for (int i = 65; i <= 90; i++) // A - Z
             {
                 intToCharMapping.Add(total + (i - 65), (char)i);
@@ -875,7 +864,29 @@ namespace CodeDuku
             {
                 return targetColor + "_" + currentColor;
             }
-            else if (currentColor != "red" && currentColor != "blue" && currentColor != "green")
+            else if (currentColor == "red_blue")
+            {
+                if (targetColor == "red" || targetColor == "blue")
+                {
+                    return "red_blue";
+                }
+                else if (targetColor == "green")
+                {
+                    return "red_blue_green";
+                }
+            }
+            else if (currentColor == "red_green")
+            {
+                if (targetColor == "red" || targetColor == "green")
+                {
+                    return "red_green";
+                }
+                else if (targetColor == "blue")
+                {
+                    return "red_blue_green";
+                }
+            }
+            else if (currentColor == "red_blue_green")
             {
                 return "red_blue_green";
             }
@@ -893,9 +904,9 @@ namespace CodeDuku
         /// <param name="targetColor">The main color to apply ("red", "blue", or "green").</param>
         /// <param name="possibleIndex">The cell whose color and neighbors will be updated.</param>
         /// <param name="cellSize">The size of each cell on the canvas.</param>
-        /// <param name="languageDicts">Dictionary containing language-specific data for limiter generation.</param>
+        /// <param name="languageDicts">Dictionary containing language-specific data for hint generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, List<string> inputList, string difficulty)
+        private static bool ColorHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, List<string> inputList, string difficulty)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -939,12 +950,12 @@ namespace CodeDuku
                     break;
             }
 
-            var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
-            cell.Letter = limiterValue;
+            var hintValue = CalculateHint(validNeighborPositions, languageDicts, cellData);
+            cell.Letter = hintValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
             int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
-            var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex, difficulty);
-            limitersAdded.Add(placedLimiter);
+            var placedHint = new PlacedHint(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, hintValue, phraseIndex, difficulty);
+            hintsAdded.Add(placedHint);
             if (!ModifyCanvas(canvas, cellData, possibleIndex.Row, possibleIndex.Col, cellSize))
                 return false;
 
@@ -976,11 +987,11 @@ namespace CodeDuku
             return true;
         }
 
-        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, int numLimiters, ref bool uniquelySolvable, List<string> inputList, string difficulty)
+        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, int numHints, ref bool uniquelySolvable, List<string> inputList, string difficulty)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
-            List<CellData> possibleLimiters = new();
+            List<CellData> possibleHints = new();
             string[] baseColors = ["red", "blue", "green"];
             Random rand = new();
             string randomColor = baseColors[rand.Next(3)];
@@ -1032,13 +1043,11 @@ namespace CodeDuku
                     }
 
                     // Check if there is at least one lightgray neighbor
-                    // done to the limiter provides new information to the player
-                    // this is not the only condition for a limiter to provide new information
-                    // but including other limiter positions requires more complex logic
+                    // done to the hint provides new information to the player
+                    // this is not the only condition for a hint to provide new information
+                    // but including other hint positions requires more complex logic
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
-
-                    //uniquelySolvable = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
 
                     // Check if the cell meets the difficulty requirement of min neighbors
                     int minCells = 0;
@@ -1048,62 +1057,62 @@ namespace CodeDuku
 
                     if (hasValidNeighbor && hasLightGrayNeighbor && meetsDifficulty)
                     {
-                        possibleLimiters.Add(cellData[r][c]);
+                        possibleHints.Add(cellData[r][c]);
                     }
                 }
             }
 
-            if (possibleLimiters.Count == 0)
+            if (possibleHints.Count == 0)
                 return false;
 
-            // Find the limiter position that is farthest from all existing limiters
-            CellData bestLimiter = possibleLimiters[0];
+            // Find the hint position that is farthest from all existing hints
+            CellData bestHint = possibleHints[0];
             double maxMinDistance = 0;
 
-            foreach (var candidate in possibleLimiters)
+            foreach (var candidate in possibleHints)
             {
-                double minDistanceToExistingLimiters = double.MaxValue;
+                double minDistanceToExistingHints = double.MaxValue;
                 
-                // Calculate minimum distance to any existing limiter
-                foreach (var existingLimiter in limitersAdded)
+                // Calculate minimum distance to any existing hint
+                foreach (var existingHint in hintsAdded)
                 {
                     double distance = Math.Sqrt(
-                        Math.Pow(candidate.Row - existingLimiter.Row, 2) + 
-                        Math.Pow(candidate.Col - existingLimiter.Col, 2)
+                        Math.Pow(candidate.Row - existingHint.Row, 2) + 
+                        Math.Pow(candidate.Col - existingHint.Col, 2)
                     );
-                    minDistanceToExistingLimiters = Math.Min(minDistanceToExistingLimiters, distance);
+                    minDistanceToExistingHints = Math.Min(minDistanceToExistingHints, distance);
                 }
                 
-                // If no existing limiters, use the first candidate or randomize
-                if (limitersAdded.Count == 0)
+                // If no existing hints, use the first candidate or randomize
+                if (hintsAdded.Count == 0)
                 {
-                    minDistanceToExistingLimiters = double.MaxValue;
+                    minDistanceToExistingHints = double.MaxValue;
                 }
                 
-                // Select candidate with maximum minimum distance (farthest from any existing limiter)
-                if (minDistanceToExistingLimiters > maxMinDistance)
+                // Select candidate with maximum minimum distance (farthest from any existing hints)
+                if (minDistanceToExistingHints > maxMinDistance)
                 {
-                    maxMinDistance = minDistanceToExistingLimiters;
-                    bestLimiter = candidate;
+                    maxMinDistance = minDistanceToExistingHints;
+                    bestHint = candidate;
                 }
-                else if (Math.Abs(minDistanceToExistingLimiters - maxMinDistance) < 0.001) // Equal distances
+                else if (Math.Abs(minDistanceToExistingHints - maxMinDistance) < 0.001) // Equal distances
                 {
                     // Break ties randomly
                     if (rand.Next(2) == 0)
                     {
-                        bestLimiter = candidate;
+                        bestHint = candidate;
                     }
                 }
             }
 
-            Console.WriteLine($"[Limiter] Placing limiter at ({bestLimiter.Row},{bestLimiter.Col}) with min distance {maxMinDistance:F2} from existing limiters");
+            Console.WriteLine($"[Hint] Placing hint at ({bestHint.Row},{bestHint.Col}) with min distance {maxMinDistance:F2} from existing hints");
 
-            return ColorLimiter(cellData, canvas, colors, randomColor, bestLimiter, cellSize, languageDicts, ref limitersAdded, inputList, difficulty);
+            return ColorHint(cellData, canvas, colors, randomColor, bestHint, cellSize, languageDicts, ref hintsAdded, inputList, difficulty);
         }
 
         /// <summary>
         /// Clears all letters from the grid (cellData) and optionally updates the canvas,
-        /// except for cells where the letter starts with '=' (e.g., limiters).
+        /// except for cells where the letter starts with '=' (e.g., hints).
         /// </summary>
         /// <param name="cellData">The 2D list representing the puzzle grid.</param>
         /// <param name="canvas">The SKCanvas on which to redraw the cleared grid. Can be null to skip canvas updates.</param>
@@ -1138,9 +1147,9 @@ namespace CodeDuku
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestLimiter) BackupGetAlternateSolutionsBackup(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedLimiter> limitersAdded, int j)
+        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, int j)
         {
-            Console.WriteLine("Beginning: BackupGetAlternateSolutionsBackup");
+            Console.WriteLine("Beginning: makePuzzleUnique");
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
 
@@ -1156,7 +1165,7 @@ namespace CodeDuku
                 originalCellData.Add(rowCopy);
             }
 
-            // Clear the grid letters (but preserve limiters) for solving
+            // Clear the grid letters (but preserve hints) for solving
             ClearGridLetters(ref cellData);
 
             // Create a working copy of the cleared cellData for the solving algorithm
@@ -1171,83 +1180,46 @@ namespace CodeDuku
                 workingGrid.Add(rowCopy);
             }
 
-            // Helper: Find all slots (start row, col, direction, length)
-            List<(int row, int col, bool drawRight, int length)> slots = new();
-            bool[,] visited = new bool[nrows, ncols];
+            // Helper: Find all slots using original cellData phrase information
+            List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
+            var processedPhrases = new HashSet<int>();
 
-            // Build set of valid slot colors from the colors dictionary
-            var validSlotColors = new HashSet<string>(new[] { "lightgray" });
-            validSlotColors.UnionWith(new[] { "red", "blue", "green", "red_blue", "red_green", "blue_green", "red_blue_green" });
-
-            // Find horizontal slots (skip limiter cells)
+            // Loop through cellData to find unique phrases and build slots
             for (int r = 0; r < nrows; r++)
             {
-                int c = 0;
-                while (c < ncols)
+                for (int c = 0; c < ncols; c++)
                 {
-                    if (validSlotColors.Contains(workingGrid[r][c].ColorName) && !visited[r, c] &&
-                        (string.IsNullOrEmpty(workingGrid[r][c].Letter) || !workingGrid[r][c].Letter.StartsWith("=")))
+                    var cell = originalCellData[r][c];
+                    
+                    // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
+                    if (!string.IsNullOrEmpty(cell.Letter) && 
+                        !cell.Letter.StartsWith("=") && 
+                        cell.PhraseIndex >= 0 && 
+                        cell.PhraseIndex < inputNames.Count &&
+                        !processedPhrases.Contains(cell.PhraseIndex))
                     {
-                        int start = c;
-                        int len = 0;
-                        int cc = c;
-                        while (cc < ncols && validSlotColors.Contains(workingGrid[r][cc].ColorName) &&
-                                (string.IsNullOrEmpty(workingGrid[r][cc].Letter) || !workingGrid[r][cc].Letter.StartsWith("=")))
-                        {
-                            visited[r, cc] = true;
-                            len++; cc++;
-                        }
-                        if (len > 1)
-                            slots.Add((r, start, true, len));
-                        c = cc;
-                    }
-                    else
-                    {
-                        c++;
-                    }
-                }
-            }
-
-            // Find vertical slots (skip limiter cells)
-            visited = new bool[nrows, ncols];
-            for (int c = 0; c < ncols; c++)
-            {
-                int r = 0;
-                while (r < nrows)
-                {
-                    if (validSlotColors.Contains(workingGrid[r][c].ColorName) && !visited[r, c] &&
-                        (string.IsNullOrEmpty(workingGrid[r][c].Letter) || !workingGrid[r][c].Letter.StartsWith("=")))
-                    {
-                        int start = r;
-                        int len = 0;
-                        int rr = r;
-                        while (rr < nrows && validSlotColors.Contains(workingGrid[rr][c].ColorName) &&
-                                (string.IsNullOrEmpty(workingGrid[rr][c].Letter) || !workingGrid[rr][c].Letter.StartsWith("=")))
-                        {
-                            visited[rr, c] = true;
-                            len++; rr++;
-                        }
-                        if (len > 1)
-                            slots.Add((start, c, false, len));
-                        r = rr;
-                    }
-                    else
-                    {
-                        r++;
+                        // Get the phrase length from inputNames
+                        int phraseLength = inputNames[cell.PhraseIndex].Length;
+                        
+                        // Add the slot using BaseRow, BaseCol, DrawRight, and calculated length
+                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, phraseLength, cell.PhraseIndex));
+                        processedPhrases.Add(cell.PhraseIndex);
+                        
+                        //Console.WriteLine($"[Solver] Found slot for phrase '{inputNames[cell.PhraseIndex]}' at ({cell.BaseRow},{cell.BaseCol}) drawRight={cell.DrawRight} length={phraseLength}");
                     }
                 }
             }
 
             Console.WriteLine($"[Solver] Found {slots.Count} slots");
 
-            // Set up limiters and language dictionaries
-            var limiters = new List<(int row, int col, string value, List<(int, int)> neighbors)>();
-            foreach (var placedLimiter in limitersAdded)
+            // Set up hints and language dictionaries
+            var hints = new List<(int row, int col, string value, List<(int, int)> neighbors)>();
+            foreach (var placedHint in hintsAdded)
             {
-                string limiterValue = cellData[placedLimiter.Row][placedLimiter.Col].Letter;
-                limiters.Add((placedLimiter.Row, placedLimiter.Col, limiterValue, placedLimiter.NeighborPositions));
+                string hintValue = cellData[placedHint.Row][placedHint.Col].Letter;
+                hints.Add((placedHint.Row, placedHint.Col, hintValue, placedHint.NeighborPositions));
             }
-            Console.WriteLine($"[Solver] Found {limiters.Count} limiters.");
+            Console.WriteLine($"[Solver] Found {hints.Count} hints.");
 
             var languageDicts = new Dictionary<string, object>();
             var charToIntMapping = new Dictionary<char, int>();
@@ -1266,7 +1238,7 @@ namespace CodeDuku
             while (stack.Count > 0)
             {
                 var (slotIdx, lastWordIdx, previousPlacements) = stack.Pop();
-
+                //Console.WriteLine("Backtracked");
                 // Clear previous placements when backtracking
                 foreach (var (r, c) in previousPlacements)
                 {
@@ -1275,7 +1247,6 @@ namespace CodeDuku
                     workingGrid[r][c] = cell;
                 }
 
-                // If we've filled all slots, we've found a solution
                 if (slotIdx == slots.Count)
                 {
                     Console.WriteLine("[Solver] All slots filled. Solution found!");
@@ -1291,14 +1262,14 @@ namespace CodeDuku
                             string workingLetter = workingGrid[r][c].Letter ?? "";
                             string originalLetter = originalCellData[r][c].Letter ?? "";
 
-                            // Skip limiter cells (start with =) when comparing
+                            // Skip hint cells (start with =) when comparing
                             if (!originalLetter.StartsWith("=") && !workingLetter.StartsWith("="))
                             {
                                 if (!string.Equals(workingLetter, originalLetter, StringComparison.OrdinalIgnoreCase))
                                 {
                                     isDifferentFromOriginal = true;
                                     differingCells.Add((r, c));
-                                    Console.WriteLine($"[Solver] Letter difference found at ({r},{c}): working='{workingLetter}' vs original='{originalLetter}'");
+                                    ///Console.WriteLine($"[Solver] Letter difference found at ({r},{c}): working='{workingLetter}' vs original='{originalLetter}'");
                                 }
                             }
                         }
@@ -1313,28 +1284,6 @@ namespace CodeDuku
                         using var altBitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
                         using var altCanvas = new SKCanvas(altBitmap);
 
-                        // Temporarily set cellData to the alternate solution for drawing
-                        // for (int r = 0; r < nrows; r++)
-                        // {
-                        //     for (int c = 0; c < ncols; c++)
-                        //     {
-                        //         cellData[r][c] = workingGrid[r][c];
-                        //     }
-                        // }
-
-                        // InitilizeCanvas(nrows, ncols, altCanvas, cellSize);
-                        // for (int r = 0; r < nrows; r++)
-                        // {
-                        //     for (int c = 0; c < ncols; c++)
-                        //     {
-                        //         ModifyCanvas(altCanvas, cellData, r, c, cellSize);
-                        //     }
-                        // }
-
-                        // string altFilename = $"crossword_unique_step_{j}.png";
-                        // ExportPuzzle(altBitmap, filename: altFilename);
-                        // Console.WriteLine($"[Solver] Exported alternate solution to {altFilename}");
-
                         //Restore the original cellData state before returning
                         for (int r = 0; r < nrows; r++)
                         {
@@ -1344,13 +1293,8 @@ namespace CodeDuku
                             }
                         }
                         UpdateFullCanvas(canvas, cellData, cellSize);
-                        
-
-                        // Console.WriteLine("I'm calling it");
-                        // FindCellWithMostNeighborDifferences(cellData, differingCells);
 
                         return (false, FindCellWithMostNeighborDifferences(cellData, differingCells));
-                        //return false; // Return false immediately when alternate solution found
                     }
                     else
                     {
@@ -1363,7 +1307,6 @@ namespace CodeDuku
                 //Console.WriteLine($"[Solver] Trying slot #{slotIdx}");
 
                 // Try each remaining word
-                bool foundValidWord = false;
                 for (int wordIdx = lastWordIdx + 1; wordIdx < inputNames.Count; wordIdx++)
                 {
                     string word = inputNames[wordIdx];
@@ -1376,7 +1319,8 @@ namespace CodeDuku
                         int r = slot.row + (slot.drawRight ? 0 : i);
                         int c = slot.col + (slot.drawRight ? i : 0);
                         var cell = workingGrid[r][c];
-                        if (!string.IsNullOrEmpty(cell.Letter) && cell.Letter != word[i].ToString())
+                        // This originally did not do ToLower() on cell.Letter and word[i].To.String() which I believe was not correct
+                        if (!string.IsNullOrEmpty(cell.Letter) && cell.Letter.ToLower() != word[i].ToString().ToLower())
                         {
                             fits = false;
                             break;
@@ -1399,9 +1343,9 @@ namespace CodeDuku
                         }
                     }
 
-                    // Check limiters
-                    bool allLimitersOk = true;
-                    foreach (var (lr, lc, lval, neighbors) in limiters)
+                    // Check hints
+                    bool allHintsOk = true;
+                    foreach (var (lr, lc, lval, neighbors) in hints)
                     {
                         var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
                         int sum = 0;
@@ -1417,10 +1361,10 @@ namespace CodeDuku
                         }
 
                         int expectedMod = -1;
-                        bool validLimiter = lval.Length >= 2 && charToInt.TryGetValue(lval[1], out expectedMod);
-                        if (!validLimiter)
+                        bool validHint = lval.Length >= 2 && charToInt.TryGetValue(lval[1], out expectedMod);
+                        if (!validHint)
                         {
-                            allLimitersOk = false;
+                            allHintsOk = false;
                             break;
                         }
 
@@ -1428,7 +1372,7 @@ namespace CodeDuku
                         {
                             if (sum % 62 != expectedMod)
                             {
-                                allLimitersOk = false;
+                                allHintsOk = false;
                                 break;
                             }
                         }
@@ -1449,20 +1393,19 @@ namespace CodeDuku
 
                             if (!possible)
                             {
-                                allLimitersOk = false;
+                                allHintsOk = false;
                                 break;
                             }
                         }
                     }
 
-                    if (allLimitersOk)
+                    if (allHintsOk)
                     {
                         //Console.WriteLine($"[Solver] Placed '{word}' at ({slot.row},{slot.col})");
                         // Save current state for backtracking
                         stack.Push((slotIdx, wordIdx, placedPositions));
                         // Move to next slot
                         stack.Push((slotIdx + 1, -1, new List<(int, int)>()));
-                        foundValidWord = true;
                         break;
                     }
                     else
@@ -1477,10 +1420,10 @@ namespace CodeDuku
                     }
                 }
 
-                if (!foundValidWord)
-                {
-                    //Console.WriteLine($"[Solver] No valid candidates for slot #{slotIdx}");
-                }
+                // if (!foundValidWord)
+                // {
+                    // Console.WriteLine($"[Solver] No valid candidates for slot #{slotIdx}");
+                // }
             }
 
             Console.WriteLine("[Solver] No alternate solutions found.");
@@ -1495,8 +1438,7 @@ namespace CodeDuku
             }
             UpdateFullCanvas(canvas, cellData, cellSize);
 
-            // Return true if no alternate solutions found (reached end without finding any)
-            return (true, default);
+            return (true, default); // Return true if no alternate solutions found
         }
 
         /// <summary>
@@ -1522,7 +1464,7 @@ namespace CodeDuku
                     var currentCell = cellData[diffRow][diffCol];
                     if (!currentCell.ColorName.Equals("white")) continue;
                     var (diagNeighbors, crossNeighbors) = GetNeighbors(cellData, currentCell, true);
-                    if (diagNeighbors.Count.Equals(0) && crossNeighbors.Count.Equals(0)) continue;
+                    if (diagNeighbors.Count == 0 && crossNeighbors.Count == 0) continue;
 
                     int crossDifferenceCount = 0;
                     int diagDifferenceCount = 0;
@@ -1589,11 +1531,11 @@ namespace CodeDuku
             // Only randomly override if the other cell type also has some differing neighbors
             var (greenDiagNeighbors, greenCrossNeighbors) = GetNeighbors(cellData, new CellData(row: bestPosition.row, col: bestPosition.col), true);
             bool hasLightGrey = false;
-            if (bestType.Equals("red") && !greenDiagNeighbors.Count.Equals(0))
+            if (bestType.Equals("red") && greenDiagNeighbors.Count > 0)
             {
                 hasLightGrey = greenDiagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
             }
-            else if (bestType.Equals("blue") && !greenCrossNeighbors.Count.Equals(0))
+            else if (bestType.Equals("blue") && greenCrossNeighbors.Count > 0)
             {
                 hasLightGrey = greenCrossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
             }
