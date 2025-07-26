@@ -92,8 +92,8 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 15; // Number of words to place in the puzzle
-            int numHints = 30;
+            int numWords = 22; // Number of words to place in the puzzle
+            int numHints = 10;
             string filename = "crossword";
             string extension = ".png";
 
