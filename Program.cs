@@ -217,11 +217,21 @@ namespace CodeDuku
             UpdateFullCanvas(canvas, cellData, cellSize);
             ExportPuzzle(bitmap, filename: "crossword_unique_step_0.png");
 
+            // Pre-filter words by length for faster lookup - created once outside the loop
+            var wordsByLength = new Dictionary<int, List<int>>();
+            for (int i = 0; i < inputNames.Count; i++)
+            {
+                int len = inputNames[i].Length;
+                if (!wordsByLength.ContainsKey(len))
+                    wordsByLength[len] = new List<int>();
+                wordsByLength[len].Add(i);
+            }
+
             puzzleIsUniquelySolvable = false;
             int j = 1;
             while (!puzzleIsUniquelySolvable)
             {
-                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, j);
+                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, j, wordsByLength);
                 puzzleIsUniquelySolvable = returnValue.isUnique;
                 var bestIndex = returnValue.bestHint.bestIndex;
                 var bestColor = returnValue.bestHint.color;
@@ -1014,31 +1024,25 @@ namespace CodeDuku
                     switch (randomColor)
                     {
                         case "red":
-                            hasValidNeighbor = crossNeighbors.Any(cell =>
-                                !string.IsNullOrEmpty(cell.Letter) &&
-                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = crossNeighbors
                                 .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
                                 .Select(n => (row: n.Row, col: n.Col))
                                 .ToList();
+                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                         case "blue":
-                            hasValidNeighbor = diagNeighbors.Any(cell =>
-                                !string.IsNullOrEmpty(cell.Letter) &&
-                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = diagNeighbors
                                 .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
                                 .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
+                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                         case "green":
-                            hasValidNeighbor = allNeighbors.Any(cell =>
-                                !string.IsNullOrEmpty(cell.Letter) &&
-                                !cell.Letter.StartsWith("="));
-                            validNeighborPositions = diagNeighbors.Concat(crossNeighbors).ToList()
+                            validNeighborPositions = diagNeighbors.Concat(crossNeighbors)
                                 .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
                                 .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
+                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                     }
 
@@ -1147,38 +1151,20 @@ namespace CodeDuku
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, int j)
+        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, int j, Dictionary<int, List<int>> wordsByLength)
         {
             Console.WriteLine("Beginning: makePuzzleUnique");
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
 
             // Store the original cellData state for restoration later
-            var originalCellData = new List<List<CellData>>();
-            for (int r = 0; r < nrows; r++)
-            {
-                var rowCopy = new List<CellData>();
-                for (int c = 0; c < ncols; c++)
-                {
-                    rowCopy.Add(cellData[r][c]);
-                }
-                originalCellData.Add(rowCopy);
-            }
+            var originalCellData = cellData.Select(row => new List<CellData>(row)).ToList();
 
             // Clear the grid letters (but preserve hints) for solving
             ClearGridLetters(ref cellData);
 
             // Create a working copy of the cleared cellData for the solving algorithm
-            var workingGrid = new List<List<CellData>>();
-            for (int r = 0; r < nrows; r++)
-            {
-                var rowCopy = new List<CellData>();
-                for (int c = 0; c < ncols; c++)
-                {
-                    rowCopy.Add(cellData[r][c]);
-                }
-                workingGrid.Add(rowCopy);
-            }
+            var workingGrid = cellData.Select(row => new List<CellData>(row)).ToList();
 
             // Helper: Find all slots using original cellData phrase information
             List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
@@ -1306,11 +1292,14 @@ namespace CodeDuku
                 var slot = slots[slotIdx];
                 //Console.WriteLine($"[Solver] Trying slot #{slotIdx}");
 
-                // Try each remaining word
-                for (int wordIdx = lastWordIdx + 1; wordIdx < inputNames.Count; wordIdx++)
+                // Get candidate words for this slot length - optimized lookup
+                if (!wordsByLength.TryGetValue(slot.length, out var candidateWordIndices))
+                    continue; // No words of this length
+
+                // Try each remaining word of the correct length - optimized to skip already tried words
+                foreach (int wordIdx in candidateWordIndices.Where(idx => idx > lastWordIdx))
                 {
                     string word = inputNames[wordIdx];
-                    if (word.Length != slot.length) continue;
 
                     // Check if word fits
                     bool fits = true;
@@ -1431,10 +1420,7 @@ namespace CodeDuku
             // Restore the original cellData state
             for (int r = 0; r < nrows; r++)
             {
-                for (int c = 0; c < ncols; c++)
-                {
-                    cellData[r][c] = originalCellData[r][c];
-                }
+                cellData[r] = new List<CellData>(originalCellData[r]);
             }
             UpdateFullCanvas(canvas, cellData, cellSize);
 
