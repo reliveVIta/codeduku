@@ -95,7 +95,7 @@ namespace CodeDuku
 
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 22; // Number of words to place in the puzzle
-            int numLimiters = 20; // todo: change to output in areas away from other limiters
+            int numLimiters = 20;
             string filename = "crossword";
             string extension = ".png";
 
