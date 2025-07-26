@@ -231,7 +231,7 @@ namespace CodeDuku
             int j = 1;
             while (!puzzleIsUniquelySolvable)
             {
-                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, j, wordsByLength);
+                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts);
                 puzzleIsUniquelySolvable = returnValue.isUnique;
                 var bestIndex = returnValue.bestHint.bestIndex;
                 var bestColor = returnValue.bestHint.color;
@@ -1151,11 +1151,13 @@ namespace CodeDuku
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, int j, Dictionary<int, List<int>> wordsByLength)
+        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts)
         {
             Console.WriteLine("Beginning: makePuzzleUnique");
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
+            var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
+
 
             // Store the original cellData state for restoration later
             var originalCellData = cellData.Select(row => new List<CellData>(row)).ToList();
@@ -1180,18 +1182,11 @@ namespace CodeDuku
                     // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
                     if (!string.IsNullOrEmpty(cell.Letter) && 
                         !cell.Letter.StartsWith("=") && 
-                        cell.PhraseIndex >= 0 && 
-                        cell.PhraseIndex < inputNames.Count &&
                         !processedPhrases.Contains(cell.PhraseIndex))
                     {
-                        // Get the phrase length from inputNames
-                        int phraseLength = inputNames[cell.PhraseIndex].Length;
-                        
-                        // Add the slot using BaseRow, BaseCol, DrawRight, and calculated length
-                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, phraseLength, cell.PhraseIndex));
+                        // Add the slot using BaseRow, BaseCol, DrawRight, and phrase index for length lookup
+                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, inputNames[cell.PhraseIndex].Length, cell.PhraseIndex));
                         processedPhrases.Add(cell.PhraseIndex);
-                        
-                        //Console.WriteLine($"[Solver] Found slot for phrase '{inputNames[cell.PhraseIndex]}' at ({cell.BaseRow},{cell.BaseCol}) drawRight={cell.DrawRight} length={phraseLength}");
                     }
                 }
             }
@@ -1207,12 +1202,6 @@ namespace CodeDuku
             }
             Console.WriteLine($"[Solver] Found {hints.Count} hints.");
 
-            var languageDicts = new Dictionary<string, object>();
-            var charToIntMapping = new Dictionary<char, int>();
-            var intToCharMapping = new Dictionary<int, char>();
-            InitializeMappings(intToCharMapping, charToIntMapping);
-            languageDicts["charToInt"] = charToIntMapping;
-            languageDicts["intToChar"] = intToCharMapping;
 
             // Stack to manage state for iterative solving
             // Each entry contains: (slotIndex, wordIndex, list of placed positions)
@@ -1273,10 +1262,7 @@ namespace CodeDuku
                         //Restore the original cellData state before returning
                         for (int r = 0; r < nrows; r++)
                         {
-                            for (int c = 0; c < ncols; c++)
-                            {
-                                cellData[r][c] = originalCellData[r][c];
-                            }
+                            cellData[r] = new List<CellData>(originalCellData[r]);
                         }
                         UpdateFullCanvas(canvas, cellData, cellSize);
 
@@ -1308,8 +1294,8 @@ namespace CodeDuku
                         int r = slot.row + (slot.drawRight ? 0 : i);
                         int c = slot.col + (slot.drawRight ? i : 0);
                         var cell = workingGrid[r][c];
-                        // This originally did not do ToLower() on cell.Letter and word[i].To.String() which I believe was not correct
-                        if (!string.IsNullOrEmpty(cell.Letter) && cell.Letter.ToLower() != word[i].ToString().ToLower())
+                        if (!string.IsNullOrEmpty(cell.Letter) && 
+                            char.ToLower(cell.Letter[0]) != char.ToLower(word[i]))
                         {
                             fits = false;
                             break;
@@ -1326,7 +1312,7 @@ namespace CodeDuku
                         if (string.IsNullOrEmpty(workingGrid[r][c].Letter))
                         {
                             var cell = workingGrid[r][c];
-                            cell.Letter = word[i].ToString();
+                            cell.Letter = $"{word[i]}";
                             workingGrid[r][c] = cell;
                             placedPositions.Add((r, c));
                         }
@@ -1336,7 +1322,14 @@ namespace CodeDuku
                     bool allHintsOk = true;
                     foreach (var (lr, lc, lval, neighbors) in hints)
                     {
-                        var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
+                        // Early validation of hint format to avoid unnecessary processing
+                        int expectedMod = -1;
+                        if (lval.Length < 2 || !charToInt.TryGetValue(lval[1], out expectedMod))
+                        {
+                            allHintsOk = false;
+                            break;
+                        }
+
                         int sum = 0;
                         int emptyCount = 0;
 
@@ -1347,14 +1340,6 @@ namespace CodeDuku
                                 sum += value;
                             else if (string.IsNullOrEmpty(letter))
                                 emptyCount++;
-                        }
-
-                        int expectedMod = -1;
-                        bool validHint = lval.Length >= 2 && charToInt.TryGetValue(lval[1], out expectedMod);
-                        if (!validHint)
-                        {
-                            allHintsOk = false;
-                            break;
                         }
 
                         if (emptyCount == 0)
@@ -1408,7 +1393,7 @@ namespace CodeDuku
 
             Console.WriteLine("[Solver] No alternate solutions found.");
 
-            // Restore the original cellData state
+            // Restore the original cellData state - optimized row copying
             for (int r = 0; r < nrows; r++)
             {
                 cellData[r] = new List<CellData>(originalCellData[r]);
