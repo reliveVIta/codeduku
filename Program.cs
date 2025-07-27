@@ -227,11 +227,50 @@ namespace CodeDuku
                 wordsByLength[len].Add(i);
             }
 
+            // Pre-build slots once outside the loop to avoid rebuilding on every makePuzzleUnique call
+            List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
+            var processedPhrases = new HashSet<int>();
+
+            // Loop through cellData to find unique phrases and build slots
+            int nrows = cellData.Count;
+            int ncols = cellData[0].Count;
+            for (int r = 0; r < nrows; r++)
+            {
+                for (int c = 0; c < ncols; c++)
+                {
+                    var cell = cellData[r][c];
+                    
+                    // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
+                    if (!string.IsNullOrEmpty(cell.Letter) && 
+                        !cell.Letter.StartsWith("=") && 
+                        !processedPhrases.Contains(cell.PhraseIndex))
+                    {
+                        // Add the slot using BaseRow, BaseCol, DrawRight, and phrase index for length lookup
+                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, inputNames[cell.PhraseIndex].Length, cell.PhraseIndex));
+                        processedPhrases.Add(cell.PhraseIndex);
+                    }
+                }
+            }
+            Console.WriteLine($"[CreatePuzzle] Pre-built {slots.Count} slots");
+
+            // Pre-calculate all coordinate positions for each slot to avoid repeated calculations
+            var slotPositions = new Dictionary<int, (int r, int c)[]>();
+            for (int slotIndex = 0; slotIndex < slots.Count; slotIndex++)
+            {
+                var slot = slots[slotIndex];
+                var positions = new (int r, int c)[slot.length];
+                for (int i = 0; i < slot.length; i++)
+                {
+                    positions[i] = (slot.row + (slot.drawRight ? 0 : i), slot.col + (slot.drawRight ? i : 0));
+                }
+                slotPositions[slotIndex] = positions;
+            }
+
             puzzleIsUniquelySolvable = false;
             int j = 1;
             while (!puzzleIsUniquelySolvable)
             {
-                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts);
+                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts, slots, slotPositions);
                 puzzleIsUniquelySolvable = returnValue.isUnique;
                 var bestIndex = returnValue.bestHint.bestIndex;
                 var bestColor = returnValue.bestHint.color;
@@ -1151,7 +1190,7 @@ namespace CodeDuku
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts)
+        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts, List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots, Dictionary<int, (int r, int c)[]> slotPositions)
         {
             Console.WriteLine("Beginning: makePuzzleUnique");
             int nrows = cellData.Count;
@@ -1168,30 +1207,7 @@ namespace CodeDuku
             // Create a working copy of the cleared cellData for the solving algorithm
             var workingGrid = cellData.Select(row => new List<CellData>(row)).ToList();
 
-            // Helper: Find all slots using original cellData phrase information
-            List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
-            var processedPhrases = new HashSet<int>();
-
-            // Loop through cellData to find unique phrases and build slots
-            for (int r = 0; r < nrows; r++)
-            {
-                for (int c = 0; c < ncols; c++)
-                {
-                    var cell = originalCellData[r][c];
-                    
-                    // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
-                    if (!string.IsNullOrEmpty(cell.Letter) && 
-                        !cell.Letter.StartsWith("=") && 
-                        !processedPhrases.Contains(cell.PhraseIndex))
-                    {
-                        // Add the slot using BaseRow, BaseCol, DrawRight, and phrase index for length lookup
-                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, inputNames[cell.PhraseIndex].Length, cell.PhraseIndex));
-                        processedPhrases.Add(cell.PhraseIndex);
-                    }
-                }
-            }
-
-            Console.WriteLine($"[Solver] Found {slots.Count} slots");
+            Console.WriteLine($"[Solver] Using {slots.Count} pre-built slots with pre-calculated positions");
 
             // Set up hints and language dictionaries
             var hints = new List<(int row, int col, string value, List<(int, int)> neighbors)>();
@@ -1287,12 +1303,14 @@ namespace CodeDuku
                 {
                     string word = inputNames[wordIdx];
 
+                    // Get pre-calculated coordinate positions for this slot
+                    var wordPositions = slotPositions[slotIdx];
+
                     // Check if word fits
                     bool fits = true;
                     for (int i = 0; i < word.Length; i++)
                     {
-                        int r = slot.row + (slot.drawRight ? 0 : i);
-                        int c = slot.col + (slot.drawRight ? i : 0);
+                        var (r, c) = wordPositions[i];
                         var cell = workingGrid[r][c];
                         if (!string.IsNullOrEmpty(cell.Letter) && 
                             char.ToLower(cell.Letter[0]) != char.ToLower(word[i]))
@@ -1307,8 +1325,7 @@ namespace CodeDuku
                     var placedPositions = new List<(int, int)>();
                     for (int i = 0; i < word.Length; i++)
                     {
-                        int r = slot.row + (slot.drawRight ? 0 : i);
-                        int c = slot.col + (slot.drawRight ? i : 0);
+                        var (r, c) = wordPositions[i];
                         if (string.IsNullOrEmpty(workingGrid[r][c].Letter))
                         {
                             var cell = workingGrid[r][c];
