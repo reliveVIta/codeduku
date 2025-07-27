@@ -93,7 +93,7 @@ namespace CodeDuku
 
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 22; // Number of words to place in the puzzle
-            int numHints = 10;
+            int numHints = 0;
             string filename = "crossword";
             string extension = ".png";
 
@@ -151,8 +151,8 @@ namespace CodeDuku
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
-            if (numHints <= 0)
-                throw new ArgumentException("numHints must be greater than 0");
+            if (numHints < 0)
+                throw new ArgumentException("numHints must be greater or equal to 0");
             if (difficultyWeights.Sum(pair => pair.Value) != 1.0f)
             {
                 throw new ArgumentException("Difficulty weights must sum to 1.0");
@@ -187,14 +187,14 @@ namespace CodeDuku
                 // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
                 string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
                 Console.WriteLine($"Selected difficulty: {difficulty}");
-                
+
                 bool HintCreated = false;
                 string currentDifficulty = difficulty;
-                
+
                 while (!HintCreated)
                 {
                     HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, currentDifficulty);
-                    
+
                     if (!HintCreated)
                     {
                         Console.WriteLine($"Failed to create Hint with difficulty '{currentDifficulty}'. Stepping down difficulty and retrying...");
@@ -239,10 +239,10 @@ namespace CodeDuku
                 for (int c = 0; c < ncols; c++)
                 {
                     var cell = cellData[r][c];
-                    
+
                     // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
-                    if (!string.IsNullOrEmpty(cell.Letter) && 
-                        !cell.Letter.StartsWith("=") && 
+                    if (!string.IsNullOrEmpty(cell.Letter) &&
+                        !cell.Letter.StartsWith("=") &&
                         !processedPhrases.Contains(cell.PhraseIndex))
                     {
                         // Add the slot using BaseRow, BaseCol, DrawRight, and phrase index for length lookup
@@ -310,7 +310,7 @@ namespace CodeDuku
             return currentDifficulty.ToLower() switch
             {
                 "legendary" => "master",
-                "master" => "expert", 
+                "master" => "expert",
                 "expert" => "intermediate",
                 "intermediate" => "novice",
                 "novice" => "beginner",
@@ -1115,23 +1115,23 @@ namespace CodeDuku
             foreach (var candidate in possibleHints)
             {
                 double minDistanceToExistingHints = double.MaxValue;
-                
+
                 // Calculate minimum distance to any existing hint
                 foreach (var existingHint in hintsAdded)
                 {
                     double distance = Math.Sqrt(
-                        Math.Pow(candidate.Row - existingHint.Row, 2) + 
+                        Math.Pow(candidate.Row - existingHint.Row, 2) +
                         Math.Pow(candidate.Col - existingHint.Col, 2)
                     );
                     minDistanceToExistingHints = Math.Min(minDistanceToExistingHints, distance);
                 }
-                
+
                 // If no existing hints, use the first candidate or randomize
                 if (hintsAdded.Count == 0)
                 {
                     minDistanceToExistingHints = double.MaxValue;
                 }
-                
+
                 // Select candidate with maximum minimum distance (farthest from any existing hints)
                 if (minDistanceToExistingHints > maxMinDistance)
                 {
@@ -1187,6 +1187,160 @@ namespace CodeDuku
             }
         }
 
+        /// <summary>
+        /// Pre-compiled hint validation structure for fast constraint checking
+        /// </summary>
+        private struct PrecompiledHint
+        {
+            public int Row;
+            public int Col;
+            public int ExpectedMod;
+            public (int r, int c)[] NeighborPositions;
+            public bool IsValid;
+            public HashSet<char> ValidChars; // Pre-computed valid characters for each position
+        }
+
+        /// <summary>
+        /// Pre-compiles hint validation logic for forward checking optimization
+        /// </summary>
+        private static PrecompiledHint[] PrecompileHints(List<PlacedHint> hintsAdded, Dictionary<char, int> charToInt, List<List<CellData>> cellData)
+        {
+            var precompiledHints = new PrecompiledHint[hintsAdded.Count];
+
+            for (int i = 0; i < hintsAdded.Count; i++)
+            {
+                var hint = hintsAdded[i];
+                string hintValue = cellData[hint.Row][hint.Col].Letter;
+
+                // Pre-validate hint format ONCE and get expectedMod
+                int expectedMod = -1;
+                bool isValid = hintValue.Length >= 2 && charToInt.TryGetValue(hintValue[1], out expectedMod);
+
+                // Pre-compute valid characters for constraint satisfaction
+                var validChars = new HashSet<char>();
+                if (isValid)
+                {
+                    foreach (var kvp in charToInt)
+                    {
+                        validChars.Add(kvp.Key);
+                    }
+                }
+
+                precompiledHints[i] = new PrecompiledHint
+                {
+                    Row = hint.Row,
+                    Col = hint.Col,
+                    ExpectedMod = expectedMod,
+                    NeighborPositions = hint.NeighborPositions.ToArray(), // Convert to array for faster access
+                    IsValid = isValid,
+                    ValidChars = validChars
+                };
+            }
+
+            return precompiledHints;
+        }
+
+        /// <summary>
+        /// Fast hint validation using pre-compiled constraints with forward checking
+        /// </summary>
+        private static bool ValidatePrecompiledHints(PrecompiledHint[] precompiledHints, List<List<CellData>> workingGrid, Dictionary<char, int> charToInt)
+        {
+            foreach (var hint in precompiledHints)
+            {
+                if (!hint.IsValid) return false; // Pre-validated format check
+
+                int sum = 0;
+                int emptyCount = 0;
+
+                // Use pre-converted array instead of List for faster iteration
+                foreach (var (nr, nc) in hint.NeighborPositions)
+                {
+                    var letter = workingGrid[nr][nc].Letter;
+                    if (!string.IsNullOrEmpty(letter) && charToInt.TryGetValue(letter[0], out int value))
+                        sum += value;
+                    else if (string.IsNullOrEmpty(letter))
+                        emptyCount++;
+                }
+
+                if (emptyCount == 0)
+                {
+                    // All neighbors filled - exact check
+                    if (sum % 62 != hint.ExpectedMod) return false;
+                }
+                else
+                {
+                    // Forward checking: can we reach the target with remaining empty cells?
+                    int currentMod = sum % 62;
+                    int neededDiff = (hint.ExpectedMod - currentMod + 62) % 62;
+                    int maxPossibleIncrease = emptyCount * 61;
+
+                    if (neededDiff > maxPossibleIncrease) return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Performs forward checking to see if placing a character at a position violates any hint constraints
+        /// </summary>
+        private static bool ForwardCheckPlacement(char placedChar, int placedRow, int placedCol, PrecompiledHint[] precompiledHints, List<List<CellData>> workingGrid, Dictionary<char, int> charToInt)
+        {
+            if (!charToInt.TryGetValue(placedChar, out int placedValue))
+                return false;
+
+            // Check each hint that includes this position
+            foreach (var hint in precompiledHints)
+            {
+                if (!hint.IsValid) continue;
+
+                // Check if this position affects this hint
+                bool affectsHint = false;
+                foreach (var (nr, nc) in hint.NeighborPositions)
+                {
+                    if (nr == placedRow && nc == placedCol)
+                    {
+                        affectsHint = true;
+                        break;
+                    }
+                }
+
+                if (!affectsHint) continue;
+
+                // Calculate new constraint state with this placement
+                int sum = placedValue; // Include the new character
+                int emptyCount = 0;
+
+                foreach (var (nr, nc) in hint.NeighborPositions)
+                {
+                    if (nr == placedRow && nc == placedCol) continue; // Already counted
+
+                    var letter = workingGrid[nr][nc].Letter;
+                    if (!string.IsNullOrEmpty(letter) && charToInt.TryGetValue(letter[0], out int value))
+                        sum += value;
+                    else if (string.IsNullOrEmpty(letter))
+                        emptyCount++;
+                }
+
+                // Check if constraint can still be satisfied
+                if (emptyCount == 0)
+                {
+                    // All positions filled - must match exactly
+                    if (sum % 62 != hint.ExpectedMod) return false;
+                }
+                else
+                {
+                    // Check if remaining empty cells can complete the constraint
+                    int currentMod = sum % 62;
+                    int neededDiff = (hint.ExpectedMod - currentMod + 62) % 62;
+                    int maxPossibleIncrease = emptyCount * 61;
+
+                    if (neededDiff > maxPossibleIncrease) return false;
+                }
+            }
+
+            return true;
+        }
+
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
@@ -1208,6 +1362,10 @@ namespace CodeDuku
             var workingGrid = cellData.Select(row => new List<CellData>(row)).ToList();
 
             Console.WriteLine($"[Solver] Using {slots.Count} pre-built slots with pre-calculated positions");
+
+            // Pre-compile hint validation logic for forward checking
+            var precompiledHints = PrecompileHints(hintsAdded, charToInt, cellData);
+            Console.WriteLine($"[Solver] Pre-compiled {precompiledHints.Length} hints for forward checking");
 
             // Set up hints and language dictionaries
             var hints = new List<(int row, int col, string value, List<(int, int)> neighbors)>();
@@ -1306,14 +1464,22 @@ namespace CodeDuku
                     // Get pre-calculated coordinate positions for this slot
                     var wordPositions = slotPositions[slotIdx];
 
-                    // Check if word fits
+                    // Check if word fits and passes forward checking
                     bool fits = true;
                     for (int i = 0; i < word.Length; i++)
                     {
                         var (r, c) = wordPositions[i];
                         var cell = workingGrid[r][c];
-                        if (!string.IsNullOrEmpty(cell.Letter) && 
+                        if (!string.IsNullOrEmpty(cell.Letter) &&
                             char.ToLower(cell.Letter[0]) != char.ToLower(word[i]))
+                        {
+                            fits = false;
+                            break;
+                        }
+
+                        // Forward checking: test if placing this character would violate constraints
+                        if (string.IsNullOrEmpty(cell.Letter) &&
+                            !ForwardCheckPlacement(word[i], r, c, precompiledHints, workingGrid, charToInt))
                         {
                             fits = false;
                             break;
@@ -1335,51 +1501,8 @@ namespace CodeDuku
                         }
                     }
 
-                    // Check hints
-                    bool allHintsOk = true;
-                    foreach (var (lr, lc, lval, neighbors) in hints)
-                    {
-                        // Early validation of hint format to avoid unnecessary processing
-                        int expectedMod = -1;
-                        if (lval.Length < 2 || !charToInt.TryGetValue(lval[1], out expectedMod))
-                        {
-                            allHintsOk = false;
-                            break;
-                        }
-
-                        int sum = 0;
-                        int emptyCount = 0;
-
-                        foreach (var (nr, nc) in neighbors)
-                        {
-                            var letter = workingGrid[nr][nc].Letter;
-                            if (!string.IsNullOrEmpty(letter) && charToInt.TryGetValue(letter[0], out int value))
-                                sum += value;
-                            else if (string.IsNullOrEmpty(letter))
-                                emptyCount++;
-                        }
-
-                        if (emptyCount == 0)
-                        {
-                            if (sum % 62 != expectedMod)
-                            {
-                                allHintsOk = false;
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            int currentMod = sum % 62;
-                            int neededDiff = (expectedMod - currentMod + 62) % 62;
-                            int maxPossibleIncrease = emptyCount * 61;
-                            
-                            if (neededDiff > maxPossibleIncrease)
-                            {
-                                allHintsOk = false;
-                                break;
-                            }
-                        }
-                    }
+                    // Check hints using optimized precompiled validation
+                    bool allHintsOk = ValidatePrecompiledHints(precompiledHints, workingGrid, charToInt);
 
                     if (allHintsOk)
                     {
@@ -1404,7 +1527,7 @@ namespace CodeDuku
 
                 // if (!foundValidWord)
                 // {
-                    // Console.WriteLine($"[Solver] No valid candidates for slot #{slotIdx}");
+                // Console.WriteLine($"[Solver] No valid candidates for slot #{slotIdx}");
                 // }
             }
 
@@ -1443,26 +1566,37 @@ namespace CodeDuku
                     var currentCell = cellData[diffRow][diffCol];
                     if (!currentCell.ColorName.Equals("white")) continue;
                     var (diagNeighbors, crossNeighbors) = GetNeighbors(cellData, currentCell, true);
+
+                    bool hasLightGreyCross = false;
+                    bool hasLightGreyDiag = false;
+                    hasLightGreyCross = crossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
+                    hasLightGreyDiag = diagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
+
                     if (diagNeighbors.Count == 0 && crossNeighbors.Count == 0) continue;
+                    if (!hasLightGreyCross && !hasLightGreyDiag) continue;
 
                     int crossDifferenceCount = 0;
                     int diagDifferenceCount = 0;
 
-                    // Count cross neighbors that are in the differing cells list
-                    foreach (var neighbor in crossNeighbors)
-                    {
-                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
+                    if (hasLightGreyCross) // require gain new information
+                    { // Count cross neighbors that are in the differing cells list
+                        foreach (var neighbor in crossNeighbors)
                         {
-                            crossDifferenceCount++;
+                            if (differingCells.Contains((neighbor.Row, neighbor.Col)))
+                            {
+                                crossDifferenceCount++;
+                            }
                         }
                     }
 
-                    // Count diagonal neighbors that are in the differing cells list
-                    foreach (var neighbor in diagNeighbors)
+                    if (hasLightGreyDiag)
                     {
-                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
-                        {
-                            diagDifferenceCount++;
+                        foreach (var neighbor in diagNeighbors)
+                        {// Count diagonal neighbors that are in the differing cells list
+                            if (differingCells.Contains((neighbor.Row, neighbor.Col)))
+                            {
+                                diagDifferenceCount++;
+                            }
                         }
                     }
 
@@ -1532,6 +1666,7 @@ namespace CodeDuku
 
             return (bestPosition, bestType);
         }
+        
         
     }
 }
