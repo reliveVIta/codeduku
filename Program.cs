@@ -93,7 +93,7 @@ namespace CodeDuku
 
             int nrows = 20, ncols = 20, cellSize = 50;
             int numWords = 22; // Number of words to place in the puzzle
-            int numHints = 0;
+            int numHints = 10;
             string filename = "crossword";
             string extension = ".png";
 
@@ -1558,61 +1558,69 @@ namespace CodeDuku
             int maxDiagDifferences = 0;
             Random rand = new Random();
 
-            // Check each differing cell and its neighbors
-            for (int diffRow = 0; diffRow < cellData.Count; diffRow++)
+            // Randomly select search direction and order (8 combinations: 4 corners x 2 iteration orders)
+            bool reverseRows = rand.Next(2) == 1;
+            bool reverseCols = rand.Next(2) == 1;
+            bool rowsFirst = rand.Next(2) == 1;
+            
+            var rowRange = reverseRows ? Enumerable.Range(0, cellData.Count).Reverse() : Enumerable.Range(0, cellData.Count);
+            var colRange = reverseCols ? Enumerable.Range(0, cellData[0].Count).Reverse() : Enumerable.Range(0, cellData[0].Count);
+            var searchOrder = rowsFirst ? 
+                from c in colRange from r in rowRange select (r, c) : 
+                from r in rowRange from c in colRange select (r, c);
+
+            // Check each cell using the selected search pattern
+            foreach (var (diffRow, diffCol) in searchOrder)
             {
-                for (int diffCol = 0; diffCol < cellData[0].Count; diffCol++)
-                {
-                    var currentCell = cellData[diffRow][diffCol];
-                    if (!currentCell.ColorName.Equals("white")) continue;
-                    var (diagNeighbors, crossNeighbors) = GetNeighbors(cellData, currentCell, true);
+                var currentCell = cellData[diffRow][diffCol];
+                if (!currentCell.ColorName.Equals("white")) continue;
+                var (diagNeighbors, crossNeighbors) = GetNeighbors(cellData, currentCell, true);
 
-                    bool hasLightGreyCross = false;
-                    bool hasLightGreyDiag = false;
-                    hasLightGreyCross = crossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
-                    hasLightGreyDiag = diagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
+                bool hasLightGreyCross = false;
+                bool hasLightGreyDiag = false;
+                hasLightGreyCross = crossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
+                hasLightGreyDiag = diagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
 
-                    if (diagNeighbors.Count == 0 && crossNeighbors.Count == 0) continue;
-                    if (!hasLightGreyCross && !hasLightGreyDiag) continue;
+                if (diagNeighbors.Count == 0 && crossNeighbors.Count == 0) continue;
+                if (!hasLightGreyCross && !hasLightGreyDiag) continue;
 
-                    int crossDifferenceCount = 0;
-                    int diagDifferenceCount = 0;
+                int crossDifferenceCount = 0;
+                int diagDifferenceCount = 0;
 
-                    if (hasLightGreyCross) // require gain new information
-                    { // Count cross neighbors that are in the differing cells list
-                        foreach (var neighbor in crossNeighbors)
+                if (hasLightGreyCross) // require gain new information
+                { // Count cross neighbors that are in the differing cells list
+                    foreach (var neighbor in crossNeighbors)
+                    {
+                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
                         {
-                            if (differingCells.Contains((neighbor.Row, neighbor.Col)))
-                            {
-                                crossDifferenceCount++;
-                            }
+                            crossDifferenceCount++;
                         }
                     }
+                }
 
-                    if (hasLightGreyDiag)
-                    {
-                        foreach (var neighbor in diagNeighbors)
-                        {// Count diagonal neighbors that are in the differing cells list
-                            if (differingCells.Contains((neighbor.Row, neighbor.Col)))
-                            {
-                                diagDifferenceCount++;
-                            }
+                if (hasLightGreyDiag)
+                {
+                    foreach (var neighbor in diagNeighbors)
+                    {// Count diagonal neighbors that are in the differing cells list
+                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
+                        {
+                            diagDifferenceCount++;
                         }
                     }
+                }
 
-                    // Update best cross cell if this one has more cross differences
-                    if (crossDifferenceCount > maxCrossDifferences)
-                    {
-                        maxCrossDifferences = crossDifferenceCount;
-                        bestCrossCell = currentCell;
-                    }
+                // Update best cross cell if this one has more cross differences
+                if (crossDifferenceCount > maxCrossDifferences)
+                {
+                    maxCrossDifferences = crossDifferenceCount;
+                    bestCrossCell = currentCell;
+                }
 
-                    // Update best diagonal cell if this one has more diagonal differences
-                    if (diagDifferenceCount > maxDiagDifferences)
-                    {
-                        maxDiagDifferences = diagDifferenceCount;
-                        bestDiagCell = currentCell;
-                    }
+                // Update best diagonal cell if this one has more diagonal differences
+                if (diagDifferenceCount > maxDiagDifferences)
+                {
+                    maxDiagDifferences = diagDifferenceCount;
+                    bestDiagCell = currentCell;
                 }
             }
 
