@@ -64,8 +64,8 @@ namespace CodeDuku
         public List<(int row, int col)> NeighborPositions;
         public string HintValue;
         public int PhraseIndex;
-        public string Difficulty;
-        public PlacedHint(int row, int col, string color, List<(int, int)> neighborPositions, string hintValue, int phraseIndex, string difficulty)
+        public int NumNeighbors;
+        public PlacedHint(int row, int col, string color, List<(int, int)> neighborPositions, string hintValue, int phraseIndex, int numNeighbors)
         {
             Row = row;
             Col = col;
@@ -73,7 +73,7 @@ namespace CodeDuku
             NeighborPositions = neighborPositions;
             HintValue = hintValue;
             PhraseIndex = phraseIndex;
-            Difficulty = difficulty;
+            NumNeighbors = numNeighbors;
         }
     }
 
@@ -97,16 +97,17 @@ namespace CodeDuku
             string filename = "crossword";
             string extension = ".png";
 
-            // key is difficulty level, value is weight
-            // difficulty for each hint is randomly selected based on these weights
-            var difficultyWeights = new Dictionary<string, float>
+            // key is required number of neighbors for the cell, value is weight
+            // required number of neighbors for each hint is randomly selected based on these weights
+            // weights must sum to 1
+            var requiredNumNeighborsWeights = new Dictionary<int, float>
             {
-                { "beginner", 0.1f },     // 1 neighbor
-                { "novice", 0.3f },       // 2 neighbors
-                { "intermediate", 0.2f }, // 3 neighbors
-                { "expert", 0.15f },       // 4 neighbors
-                { "master", 0.15f },       // 5 neighbors
-                { "legendary", 0.1f }     // 6 neighbors
+                { 1, 0.1f },     // 1 neighbor
+                { 2, 0.3f },     // 2 neighbors
+                { 3, 0.2f },     // 3 neighbors
+                { 4, 0.15f },    // 4 neighbors
+                { 5, 0.15f },    // 5 neighbors
+                { 6, 0.1f }      // 6 neighbors
             };
 
             using var bitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
@@ -117,7 +118,7 @@ namespace CodeDuku
             DefineColors(colors);
             InitializeCanvas(nrows, ncols, canvas, cellSize);
 
-            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, difficultyWeights: difficultyWeights, bitmap);
+            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, requiredNumNeighborsWeights, bitmap);
             ExportPuzzle(bitmap, filename: filename + extension);
 
             ClearGridLetters(ref cellData, canvas, cellSize);
@@ -135,7 +136,7 @@ namespace CodeDuku
         /// <param name="cellSize">Size in pixels of each grid cell.</param>
         /// <param name="numWords">Number of words to place in the puzzle.</param>
         /// <param name="numHints">Number of Hints to generate.</param>
-        /// <param name="difficulty">String indicating puzzle difficulty level.</param>
+        /// <param name="requiredNumNeighborsWeights">String indicating weights for the number of neighbors hints should have.</param>
         /// <returns>The updated crossword grid with placed words and hints.</returns>
         private static List<List<CellData>> CreatePuzzle(
             ref List<List<CellData>> cellData,
@@ -146,22 +147,22 @@ namespace CodeDuku
             int cellSize,
             int numWords,
             int numHints,
-            Dictionary<string, float> difficultyWeights,
+            Dictionary<int, float> requiredNumNeighborsWeights,
             SKBitmap bitmap)
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
             if (numHints < 0)
                 throw new ArgumentException("numHints must be greater or equal to 0");
-            if (difficultyWeights.Sum(pair => pair.Value) != 1.0f)
+            if (requiredNumNeighborsWeights.Sum(pair => pair.Value) != 1.0f)
             {
-                throw new ArgumentException("Difficulty weights must sum to 1.0");
+                throw new ArgumentException("numNeighbors weights must sum to 1.0");
             }
 
             Random rand = new Random();
-            List<string> weightedPool = new();
+            List<int> weightedPool = new();
 
-            foreach (var pair in difficultyWeights)
+            foreach (var pair in requiredNumNeighborsWeights)
             {
                 int count = (int)(pair.Value * 10);
                 for (int i = 0; i < count; i++)
@@ -184,29 +185,28 @@ namespace CodeDuku
             for (int i = 0; i < numHints; i++)
             {
                 bool uniquelySolvable = false; // reset for each Hint. unnecessary.
-                // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
-                string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
-                Console.WriteLine($"Selected difficulty: {difficulty}");
+                // valid requiredNumNeighbors: 1, 2, 3, 4, 5, 6
+                int requiredNumNeighbors = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
+                Console.WriteLine($"Selected requiredNumNeighbors: {requiredNumNeighbors}");
 
                 bool HintCreated = false;
-                string currentDifficulty = difficulty;
 
                 while (!HintCreated)
                 {
-                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, currentDifficulty);
+                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, requiredNumNeighbors);
 
                     if (!HintCreated)
                     {
-                        Console.WriteLine($"Failed to create Hint with difficulty '{currentDifficulty}'. Stepping down difficulty and retrying...");
-                        string steppedDownDifficulty = StepDownDifficulty(currentDifficulty);
-                        if (steppedDownDifficulty != currentDifficulty)
+                        Console.WriteLine($"Failed to create Hint with requiredNumNeighbors '{requiredNumNeighbors}'. Stepping down requiredNumNeighbors and retrying...");
+                        int steppedDownRequiredNumNeighbors = StepDownRequiredNumNeighbors(requiredNumNeighbors);
+                        if (steppedDownRequiredNumNeighbors != requiredNumNeighbors)
                         {
-                            Console.WriteLine($"Retrying with difficulty '{steppedDownDifficulty}'");
-                            currentDifficulty = steppedDownDifficulty;
+                            Console.WriteLine($"Retrying with requiredNumNeighbors '{steppedDownRequiredNumNeighbors}'");
+                            requiredNumNeighbors = steppedDownRequiredNumNeighbors;
                         }
                         else
                         {
-                            Console.WriteLine("Already at minimum difficulty level, skipping this hint");
+                            Console.WriteLine($"Already at minimum requiredNumNeighbors level ({requiredNumNeighbors}), skipping this hint");
                             break;
                         }
                     }
@@ -276,7 +276,7 @@ namespace CodeDuku
                 var bestColor = returnValue.bestHint.color;
                 if (!puzzleIsUniquelySolvable)
                 {
-                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, "beginner");
+                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, 1);
                     UpdateFullCanvas(canvas, cellData, cellSize);
                     Console.WriteLine($"[Solver] Exported alternate solution to crossword_unique_step_{j}.png");
                     ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
@@ -293,29 +293,25 @@ namespace CodeDuku
         }
 
         /// <summary>
-        /// Steps down the difficulty level to a lower/easier level when hint creation fails.
-        /// Used for fallback when no valid hint positions are found for the current difficulty.
+        /// Steps down the requiredNumNeighbors level to a lower level when hint creation fails.
+        /// Used for fallback when no valid hint positions are found for the current requiredNumNeighbors.
         /// </summary>
-        /// <param name="currentDifficulty">The current difficulty level that failed.</param>
+        /// <param name="requiredNumNeighbors">The current requiredNumNeighbors that failed.</param>
         /// <returns>
-        /// A string representing the next lower difficulty level, or the same difficulty if already at minimum.
-        /// Difficulty hierarchy (hardest to easiest): legendary -> master -> expert -> intermediate -> novice -> beginner
+        /// An integer representing the next lower requiredNumNeighbors, or the same requiredNumNeighbors if already at minimum.
+        /// requiredNumNeighbors hierarchy: 6 -> 5 -> 4 -> 3 -> 2 -> 1
         /// </returns>
-        private static string StepDownDifficulty(string currentDifficulty)
+        private static int StepDownRequiredNumNeighbors(int requiredNumNeighbors)
         {
-            // Define the difficulty hierarchy from hardest to easiest
-            // Each level corresponds to the number of neighbor cells required:
-            // legendary: 6 neighbors, master: 5 neighbors, expert: 4 neighbors, 
-            // intermediate: 3 neighbors, novice: 2 neighbors, beginner: 1 neighbor
-            return currentDifficulty.ToLower() switch
+            return requiredNumNeighbors switch
             {
-                "legendary" => "master",
-                "master" => "expert",
-                "expert" => "intermediate",
-                "intermediate" => "novice",
-                "novice" => "beginner",
-                "beginner" => "beginner", // Already at minimum difficulty
-                _ => "beginner" // Default fallback for unknown difficulties
+                6 => 5,
+                5 => 4,
+                4 => 3,
+                3 => 2,
+                2 => 1,
+                1 => 1, // Already at minimum requiredNumNeighbors
+                _ => 1 // Default fallback for unknown requiredNumNeighbors
             };
         }
 
@@ -955,7 +951,7 @@ namespace CodeDuku
         /// <param name="cellSize">The size of each cell on the canvas.</param>
         /// <param name="languageDicts">Dictionary containing language-specific data for hint generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, List<string> inputList, string difficulty)
+        private static bool ColorHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, List<string> inputList, int requiredNumNeighbors)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -1003,7 +999,7 @@ namespace CodeDuku
             cell.Letter = hintValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
             int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
-            var placedHint = new PlacedHint(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, hintValue, phraseIndex, difficulty);
+            var placedHint = new PlacedHint(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, hintValue, phraseIndex, requiredNumNeighbors);
             hintsAdded.Add(placedHint);
             if (!ModifyCanvas(canvas, cellData, possibleIndex.Row, possibleIndex.Col, cellSize))
                 return false;
@@ -1036,7 +1032,7 @@ namespace CodeDuku
             return true;
         }
 
-        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, int numHints, ref bool uniquelySolvable, List<string> inputList, string difficulty)
+        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, int numHints, ref bool uniquelySolvable, List<string> inputList, int requiredNumNeighbors)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -1045,8 +1041,10 @@ namespace CodeDuku
             Random rand = new();
             string randomColor = baseColors[rand.Next(3)];
             bool hasValidNeighbor = false;
-            bool meetsDifficulty = false;
-            var overlapLevels = new Dictionary<string, int> { ["beginner"] = 1, ["novice"] = 2, ["intermediate"] = 3, ["expert"] = 4, ["master"] = 5, ["legendary"] = 6 };
+            bool hasRequiredNumNeighbors = false;
+
+            if (requiredNumNeighbors < 1 || requiredNumNeighbors > 6)
+                throw new ArgumentException($"Invalid requiredNumNeighbors: {requiredNumNeighbors}. Must be between 1 and 6 inclusive.");
 
             for (int r = 0; r < nrows; r++)
             {
@@ -1092,13 +1090,10 @@ namespace CodeDuku
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
-                    // Check if the cell meets the difficulty requirement of min neighbors
-                    int minCells = 0;
-                    if (!overlapLevels.TryGetValue(difficulty, out minCells))
-                        throw new ArgumentException($"Invalid difficulty level: {difficulty}");
-                    meetsDifficulty = minCells == validNeighborPositions.Count;
+                    // Check if the cell meets the requiredNumNeighbors requirement of min neighbors
+                    hasRequiredNumNeighbors = requiredNumNeighbors == validNeighborPositions.Count;
 
-                    if (hasValidNeighbor && hasLightGrayNeighbor && meetsDifficulty)
+                    if (hasValidNeighbor && hasLightGrayNeighbor && hasRequiredNumNeighbors)
                     {
                         possibleHints.Add(cellData[r][c]);
                     }
@@ -1150,7 +1145,7 @@ namespace CodeDuku
 
             Console.WriteLine($"[Hint] Placing hint at ({bestHint.Row},{bestHint.Col}) with min distance {maxMinDistance:F2} from existing hints");
 
-            return ColorHint(cellData, canvas, colors, randomColor, bestHint, cellSize, languageDicts, ref hintsAdded, inputList, difficulty);
+            return ColorHint(cellData, canvas, colors, randomColor, bestHint, cellSize, languageDicts, ref hintsAdded, inputList, requiredNumNeighbors);
         }
 
         /// <summary>
