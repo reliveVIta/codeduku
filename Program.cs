@@ -1,4 +1,4 @@
-﻿using SkiaSharp;
+using SkiaSharp;
 
 namespace CodeDuku
 {
@@ -16,9 +16,8 @@ namespace CodeDuku
         public bool DrawRight;        // Direction: true for horizontal, false for vertical
         public int BaseRow;           // Row index of the base (start) of the phrase
         public int BaseCol;           // Col index of the base (start) of the phrase
-        public bool IsOverlap;        // True if this cell contains an overlapping letter from multiple words
 
-        public CellData(string letter = "", SKColor? background = null, string colorName = "white", int row = 0, int col = 0, int phraseIndex = 0, bool drawRight = true, int baseRow = 0, int baseCol = 0, bool isOverlap = false)
+        public CellData(string letter = "", SKColor? background = null, string colorName = "white", int row = 0, int col = 0, int phraseIndex = 0, bool drawRight = true, int baseRow = 0, int baseCol = 0)
         {
             Letter = letter;
             Background = background ?? SKColors.White;
@@ -29,7 +28,6 @@ namespace CodeDuku
             DrawRight = drawRight;
             BaseRow = baseRow;
             BaseCol = baseCol;
-            IsOverlap = isOverlap;
         }
     }
     
@@ -54,26 +52,26 @@ namespace CodeDuku
     }
     
     /// <summary>
-    /// Represents a hint placed on the crossword grid, including its position, color, neighbor positions, and hint value.
+    /// Represents a limiter placed on the crossword grid, including its position, color, neighbor positions, and limiter value.
     /// </summary>
-    struct PlacedHint
+    struct PlacedLimiter
     {
         public int Row;
         public int Col;
         public string Color;
         public List<(int row, int col)> NeighborPositions;
-        public string HintValue;
+        public string LimiterValue;
         public int PhraseIndex;
-        public int NumNeighbors;
-        public PlacedHint(int row, int col, string color, List<(int, int)> neighborPositions, string hintValue, int phraseIndex, int numNeighbors)
+        public string Difficulty;
+        public PlacedLimiter(int row, int col, string color, List<(int, int)> neighborPositions, string limiterValue, int phraseIndex, string difficulty)
         {
             Row = row;
             Col = col;
             Color = color;
             NeighborPositions = neighborPositions;
-            HintValue = hintValue;
+            LimiterValue = limiterValue;
             PhraseIndex = phraseIndex;
-            NumNeighbors = numNeighbors;
+            Difficulty = difficulty;
         }
     }
 
@@ -92,41 +90,50 @@ namespace CodeDuku
             languageDicts["intToChar"] = intToCharMapping;
 
             int nrows = 20, ncols = 20, cellSize = 50;
-            int numWords = 22; // Number of words to place in the puzzle
-            int numHints = 10;
+            int numWords = 17; // Number of words to place in the puzzle
+            int numLimiters = 7;
             string filename = "crossword";
             string extension = ".png";
 
-            // key is required number of neighbors for the cell, value is weight
-            // required number of neighbors for each hint is randomly selected based on these weights
-            // weights must sum to 1
-            var requiredNumNeighborsWeights = new Dictionary<int, float>
+            // key is difficulty level, value is weight
+            // difficulty for each limiter is randomly selected based on these weights
+            var difficultyWeights = new Dictionary<string, float>
             {
-                { 1, 0.1f },     // 1 neighbor
-                { 2, 0.3f },     // 2 neighbors
-                { 3, 0.2f },     // 3 neighbors
-                { 4, 0.15f },    // 4 neighbors
-                { 5, 0.15f },    // 5 neighbors
-                { 6, 0.1f }      // 6 neighbors
+                { "beginner", 1.0f },
+                { "novice", 0.0f },
+                { "intermediate", 0.0f },
+                { "expert", 0.0f },
+                { "master", 0.0f },
+                { "legendary", 0.0f }
             };
 
             using var bitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
             using var canvas = new SKCanvas(bitmap);
 
             InitializeGrid(ref cellData, nrows, ncols); //proper error handling is needed
-            InitializeMappings(intToCharMapping, charToIntMapping);
-            DefineColors(colors);
-            InitializeCanvas(nrows, ncols, canvas, cellSize);
+            InitilizeMappings(intToCharMapping, charToIntMapping);
+            define_colors(colors);
+            InitilizeCanvas(nrows, ncols, canvas, cellSize);
 
-            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, requiredNumNeighborsWeights, bitmap);
+            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numLimiters: numLimiters, difficultyWeights: difficultyWeights);
             ExportPuzzle(bitmap, filename: filename + extension);
 
             ClearGridLetters(ref cellData, canvas, cellSize);
             ExportPuzzle(bitmap, filename: filename + "_blank" + extension);
+
+
+            /*for (int i = 0; i < 1; i++) //Example code for creating multiple puzzles
+            {
+                reset_variables(ref cellData, ref inputs_added);
+                initialize_grid(ref cellData, nrows, ncols); //proper error handling is needed
+                initilize_canvas(nrows, ncols, canvas, cellSize);
+                create_puzzle(ref cellData, input_names, canvas, language_dicts, colors, cellSize, num_words: num_words, num_limiters: num_limiters, difficulty: difficulty);
+                //export_puzzle(bitmap, filename: "tmp" + i.ToString() + ".png");
+            }*/
         }
 
         /// <summary>
-        /// Generates a crossword puzzle by placing words and Hints on the grid and drawing them on the canvas.
+        /// Generates a crossword puzzle by placing words and limiters on the grid and drawing them on the canvas.
         /// </summary>
         /// <param name="cellData">The crossword grid to populate.</param>
         /// <param name="inputNames">List of possible input words.</param>
@@ -135,9 +142,9 @@ namespace CodeDuku
         /// <param name="colors">Mapping of color names to SKColor values.</param>
         /// <param name="cellSize">Size in pixels of each grid cell.</param>
         /// <param name="numWords">Number of words to place in the puzzle.</param>
-        /// <param name="numHints">Number of Hints to generate.</param>
-        /// <param name="requiredNumNeighborsWeights">String indicating weights for the number of neighbors hints should have.</param>
-        /// <returns>The updated crossword grid with placed words and hints.</returns>
+        /// <param name="numLimiters">Number of limiter elements to generate.</param>
+        /// <param name="difficulty">String indicating puzzle difficulty level.</param>
+        /// <returns>The updated crossword grid with placed words and limiters.</returns>
         private static List<List<CellData>> CreatePuzzle(
             ref List<List<CellData>> cellData,
             List<string> inputNames,
@@ -146,23 +153,22 @@ namespace CodeDuku
             Dictionary<string, SKColor> colors,
             int cellSize,
             int numWords,
-            int numHints,
-            Dictionary<int, float> requiredNumNeighborsWeights,
-            SKBitmap bitmap)
+            int numLimiters,
+            Dictionary<string, float> difficultyWeights)
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
-            if (numHints < 0)
-                throw new ArgumentException("numHints must be greater or equal to 0");
-            if (requiredNumNeighborsWeights.Sum(pair => pair.Value) != 1.0f)
+            if (numLimiters <= 0)
+                throw new ArgumentException("numLimiters must be greater than 0");
+            if (difficultyWeights.Sum(pair => pair.Value) != 1.0f)
             {
-                throw new ArgumentException("numNeighbors weights must sum to 1.0");
+                throw new ArgumentException("Difficulty weights must sum to 1.0");
             }
 
             Random rand = new Random();
-            List<int> weightedPool = new();
+            List<string> weightedPool = new();
 
-            foreach (var pair in requiredNumNeighborsWeights)
+            foreach (var pair in difficultyWeights)
             {
                 int count = (int)(pair.Value * 10);
                 for (int i = 0; i < count; i++)
@@ -172,7 +178,7 @@ namespace CodeDuku
             }
 
             List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
-            List<PlacedHint> HintsAdded = new List<PlacedHint>();
+            List<PlacedLimiter> limitersAdded = new List<PlacedLimiter>();
             bool puzzleIsUniquelySolvable = true;
 
             inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
@@ -182,137 +188,26 @@ namespace CodeDuku
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
-            for (int i = 0; i < numHints; i++)
+            for (int i = 0; i < numLimiters; i++)
             {
-                bool uniquelySolvable = false; // reset for each Hint. unnecessary.
-                // valid requiredNumNeighbors: 1, 2, 3, 4, 5, 6
-                int requiredNumNeighbors = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
-                Console.WriteLine($"Selected requiredNumNeighbors: {requiredNumNeighbors}");
-
-                bool HintCreated = false;
-
-                while (!HintCreated)
-                {
-                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, requiredNumNeighbors);
-
-                    if (!HintCreated)
-                    {
-                        Console.WriteLine($"Failed to create Hint with requiredNumNeighbors '{requiredNumNeighbors}'. Stepping down requiredNumNeighbors and retrying...");
-                        int steppedDownRequiredNumNeighbors = StepDownRequiredNumNeighbors(requiredNumNeighbors);
-                        if (steppedDownRequiredNumNeighbors != requiredNumNeighbors)
-                        {
-                            Console.WriteLine($"Retrying with requiredNumNeighbors '{steppedDownRequiredNumNeighbors}'");
-                            requiredNumNeighbors = steppedDownRequiredNumNeighbors;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Already at minimum requiredNumNeighbors level ({requiredNumNeighbors}), skipping this hint");
-                            break;
-                        }
-                    }
-                }
+                bool uniquelySolvable = false; // reset for each limiter. unnecessary.
+                // valid difficulties: "beginner", "novice", "intermediate", "expert", "master", "legendary"
+                string difficulty = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
+                Console.WriteLine($"Selected difficulty: {difficulty}");
+                CreateLimiter(cellData, canvas, colors, cellSize, languageDicts, ref limitersAdded, numLimiters, ref uniquelySolvable, inputNames, difficulty);
                 puzzleIsUniquelySolvable = puzzleIsUniquelySolvable && uniquelySolvable;
             }
 
-            UpdateFullCanvas(canvas, cellData, cellSize);
-            ExportPuzzle(bitmap, filename: "crossword_unique_step_0.png");
-
-            // Pre-filter words by length for faster lookup - created once outside the loop
-            var wordsByLength = new Dictionary<int, List<int>>();
-            for (int i = 0; i < inputNames.Count; i++)
+            if (!puzzleIsUniquelySolvable)
             {
-                int len = inputNames[i].Length;
-                if (!wordsByLength.ContainsKey(len))
-                    wordsByLength[len] = new List<int>();
-                wordsByLength[len].Add(i);
+                Console.WriteLine("WARNING: Puzzle may not have a unique solution.");
             }
-
-            // Pre-build slots once outside the loop to avoid rebuilding on every makePuzzleUnique call
-            List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
-            var processedPhrases = new HashSet<int>();
-
-            // Loop through cellData to find unique phrases and build slots
-            int nrows = cellData.Count;
-            int ncols = cellData[0].Count;
-            for (int r = 0; r < nrows; r++)
+            else
             {
-                for (int c = 0; c < ncols; c++)
-                {
-                    var cell = cellData[r][c];
-
-                    // Check if this cell contains a letter (not hint) and we haven't processed this phrase yet
-                    if (!string.IsNullOrEmpty(cell.Letter) &&
-                        !cell.Letter.StartsWith("=") &&
-                        !processedPhrases.Contains(cell.PhraseIndex))
-                    {
-                        // Add the slot using BaseRow, BaseCol, DrawRight, and phrase index for length lookup
-                        slots.Add((cell.BaseRow, cell.BaseCol, cell.DrawRight, inputNames[cell.PhraseIndex].Length, cell.PhraseIndex));
-                        processedPhrases.Add(cell.PhraseIndex);
-                    }
-                }
+                Console.WriteLine("Puzzle has a unique solution.");
             }
-            Console.WriteLine($"[CreatePuzzle] Pre-built {slots.Count} slots");
-
-            // Pre-calculate all coordinate positions for each slot to avoid repeated calculations
-            var slotPositions = new Dictionary<int, (int r, int c)[]>();
-            for (int slotIndex = 0; slotIndex < slots.Count; slotIndex++)
-            {
-                var slot = slots[slotIndex];
-                var positions = new (int r, int c)[slot.length];
-                for (int i = 0; i < slot.length; i++)
-                {
-                    positions[i] = (slot.row + (slot.drawRight ? 0 : i), slot.col + (slot.drawRight ? i : 0));
-                }
-                slotPositions[slotIndex] = positions;
-            }
-
-            puzzleIsUniquelySolvable = false;
-            int j = 1;
-            while (!puzzleIsUniquelySolvable)
-            {
-                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts, slots, slotPositions);
-                puzzleIsUniquelySolvable = returnValue.isUnique;
-                var bestIndex = returnValue.bestHint.bestIndex;
-                var bestColor = returnValue.bestHint.color;
-                if (!puzzleIsUniquelySolvable)
-                {
-                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, 1);
-                    UpdateFullCanvas(canvas, cellData, cellSize);
-                    Console.WriteLine($"[Solver] Exported alternate solution to crossword_unique_step_{j}.png");
-                    ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
-                    j++;
-                }
-            }
-
-            UpdateFullCanvas(canvas, cellData, cellSize);
-
-            string solutionStatus = puzzleIsUniquelySolvable ? "unique" : "non-unique";
-            Console.WriteLine($"[Result] Final puzzle is {solutionStatus}");
 
             return cellData;
-        }
-
-        /// <summary>
-        /// Steps down the requiredNumNeighbors level to a lower level when hint creation fails.
-        /// Used for fallback when no valid hint positions are found for the current requiredNumNeighbors.
-        /// </summary>
-        /// <param name="requiredNumNeighbors">The current requiredNumNeighbors that failed.</param>
-        /// <returns>
-        /// An integer representing the next lower requiredNumNeighbors, or the same requiredNumNeighbors if already at minimum.
-        /// requiredNumNeighbors hierarchy: 6 -> 5 -> 4 -> 3 -> 2 -> 1
-        /// </returns>
-        private static int StepDownRequiredNumNeighbors(int requiredNumNeighbors)
-        {
-            return requiredNumNeighbors switch
-            {
-                6 => 5,
-                5 => 4,
-                4 => 3,
-                3 => 2,
-                2 => 1,
-                1 => 1, // Already at minimum requiredNumNeighbors
-                _ => 1 // Default fallback for unknown requiredNumNeighbors
-            };
         }
 
         /// <summary>
@@ -499,7 +394,7 @@ namespace CodeDuku
         }
 
         /// <summary>
-        /// Computes a hint string based on the sum of encoded character values at specified grid positions.
+        /// Computes a limiter string based on the sum of encoded character values at specified grid positions.
         /// </summary>
         /// <param name="pickedBorderIndex">List of (row, column) positions to include in the calculation.</param>
         /// <param name="languageDicts">Dictionary containing character-to-integer and integer-to-character mappings.</param>
@@ -507,7 +402,7 @@ namespace CodeDuku
         /// <returns>
         /// A string starting with '=' followed by a character representing the encoded sum modulo 62.
         /// </returns>
-        private static string CalculateHint(List<(int, int)> pickedBorderIndex, Dictionary<string, object> languageDicts, List<List<CellData>> cellData)
+        private static string CalculateLimiter(List<(int, int)> pickedBorderIndex, Dictionary<string, object> languageDicts, List<List<CellData>> cellData)
         {
             var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
             var intToChar = (Dictionary<int, char>)languageDicts["intToChar"];
@@ -537,7 +432,7 @@ namespace CodeDuku
         /// Populates the provided dictionary with named SKColor values used in the crossword puzzle.
         /// </summary>
         /// <param name="colors">A dictionary to store color names and their corresponding SKColor values.</param>
-        private static void DefineColors(Dictionary<string, SKColor> colors)
+        private static void define_colors(Dictionary<string, SKColor> colors)
         {
             colors.Add("red", new SKColor(243, 174, 172));
             colors.Add("blue", new SKColor(170, 170, 249));
@@ -547,12 +442,11 @@ namespace CodeDuku
             colors.Add("dark_green", new SKColor(132, 232, 110));
             colors.Add("red_blue", new SKColor(212, 168, 212));
             colors.Add("red_green", new SKColor(212, 212, 168));
-            ///colors.Add("blue_green", new SKColor(168, 212, 212));
-            colors.Add("blue_green", new SKColor(240, 199, 183));
+            colors.Add("blue_green", new SKColor(168, 212, 212));
             colors.Add("red_blue_green", new SKColor(197, 197, 197));
         }
 
-        static void InitializeCanvas(int nrows, int ncols, SKCanvas canvas, int cellSize)
+        static void InitilizeCanvas(int nrows, int ncols, SKCanvas canvas, int cellSize)
         {
             var borderPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 2, IsStroke = true };
             canvas.Clear(SKColors.White);
@@ -579,50 +473,33 @@ namespace CodeDuku
         }
 
         /// <summary>
-        /// Initializes two maps containing conversion info to and from codeduku ascii.
+        /// Initilizes two maps containing conversion info to and from codeduku ascii.
         /// </summary>
         /// <param name="intToCharMapping">The map that converts ints to their equivalent char representation.</param>
         /// <param name="charToIntMapping">The map that converts chars to their equivalent int representation.</param>
         /// <returns>void.</returns>
-        private static void InitializeMappings(Dictionary<int, char> intToCharMapping, Dictionary<char, int> charToIntMapping)
+        private static void InitilizeMappings(Dictionary<int, char> intToCharMapping, Dictionary<char, int> charToIntMapping)
         {
             int total = 0;
             for (int i = 48; i <= 57; i++) // 0 - 9
             {
                 intToCharMapping.Add(total + (i - 48), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 48));
-                // Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 48)));
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 48)));
             }
             total += (57 - 48) + 1;
             for (int i = 97; i <= 122; i++) // a - z
             {
                 intToCharMapping.Add(total + (i - 97), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 97));
-                // Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 97)));
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 97)));
             }
-            total += (122 - 97) + 1;
+            total += (90 - 65) + 1;
             for (int i = 65; i <= 90; i++) // A - Z
             {
                 intToCharMapping.Add(total + (i - 65), (char)i);
                 charToIntMapping.Add((char)i, total + (i - 65));
-                // Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 65)));
-            }
-        }
-
-        /// <summary>
-        /// Updates the entire canvas by redrawing all cells in the grid.
-        /// </summary>
-        /// <param name="canvas">The SKCanvas to update.</param>
-        /// <param name="cellData">The 2D grid of CellData representing the puzzle.</param>
-        /// <param name="cellSize">The size of each cell in pixels.</param>
-        private static void UpdateFullCanvas(SKCanvas canvas, List<List<CellData>> cellData, int cellSize)
-        {
-            for (int r = 0; r < cellData.Count; r++)
-            {
-                for (int c = 0; c < cellData[0].Count; c++)
-                {
-                    ModifyCanvas(canvas, cellData, r, c, cellSize);
-                }
+                Console.WriteLine("char: " + (char)i + "; value: " + (total + (i - 65)));
             }
         }
 
@@ -714,9 +591,6 @@ namespace CodeDuku
                 string newChar = phraseInfo.Phrase[i].ToString();
                 string existingChar = cellData[r][c].Letter;
 
-                // Check if this is an overlapping letter (cell already has a letter)
-                bool isOverlapCell = !string.IsNullOrEmpty(existingChar);
-
                 // Determine if the resulting character should be uppercase
                 bool shouldBeUpper =
                     (!string.IsNullOrEmpty(newChar) && char.IsUpper(newChar[0])) ||
@@ -732,7 +606,6 @@ namespace CodeDuku
                 cell.DrawRight = phraseInfo.DrawRight;
                 cell.BaseRow = phraseInfo.Row;
                 cell.BaseCol = phraseInfo.Col;
-                cell.IsOverlap = isOverlapCell; // Set to true if there was already a letter in this cell
                 cellData[r][c] = cell;
 
                 ModifyCanvas(canvas, cellData, r, c, cellSize);
@@ -823,12 +696,11 @@ namespace CodeDuku
         /// <item><description>List of non-diagonal cross neighbors (cross_neighbors)</description></item>
         /// </list>
         /// </returns>
-        private static (List<CellData> diag_neighbors, List<CellData> cross_neighbors) GetNeighbors(List<List<CellData>> cellData, CellData cell, bool isAlternate = false)
+        private static (List<CellData> diag_neighbors, List<CellData> cross_neighbors) GetNeighbors(List<List<CellData>> cellData, CellData cell)
         {
             // todo: modify to do somthing different if the cell passed in is default
             var diagNeighbors = new List<CellData>();
             var crossNeighbors = new List<CellData>();
-            List<string> validColors = new List<string> { "lightgray", "red", "blue", "green", "red_blue", "red_green", "blue_green", "red_blue_green" };
 
             // All 8 neighbor offsets: diagonals and crosses
             (int row, int col)[] offsets = {
@@ -847,32 +719,11 @@ namespace CodeDuku
 
                 if (offsets[i].row != 0 && offsets[i].col != 0) // Diagonal neighbor
                 {
-                    if (isAlternate)
-                    {
-                        if (validColors.Contains(neighbor.ColorName))
-                        {
-                            diagNeighbors.Add(neighbor);
-                        }
-                    }
-                    else
-                    {
-                        diagNeighbors.Add(string.IsNullOrEmpty(neighbor.Letter) || neighbor.Letter[0].Equals('=') ? new CellData() : neighbor);
-                    }
+                    diagNeighbors.Add(string.IsNullOrEmpty(neighbor.Letter) || neighbor.Letter[0].Equals('=') ? new CellData() : neighbor);
                 }
                 else // Cross (non-diagonal) neighbor
                 {
-                    if (isAlternate)
-                    {
-                        if (validColors.Contains(neighbor.ColorName))
-                        {
-                            crossNeighbors.Add(neighbor);
-                        }
-                    }
-                    else
-                    {
-                        crossNeighbors.Add(string.IsNullOrEmpty(neighbor.Letter) || neighbor.Letter[0].Equals('=') ? new CellData() : neighbor);
-                    }
-
+                    crossNeighbors.Add(string.IsNullOrEmpty(neighbor.Letter) || neighbor.Letter[0].Equals('=') ? new CellData() : neighbor);
                 }
             }
 
@@ -909,29 +760,7 @@ namespace CodeDuku
             {
                 return targetColor + "_" + currentColor;
             }
-            else if (currentColor == "red_blue")
-            {
-                if (targetColor == "red" || targetColor == "blue")
-                {
-                    return "red_blue";
-                }
-                else if (targetColor == "green")
-                {
-                    return "red_blue_green";
-                }
-            }
-            else if (currentColor == "red_green")
-            {
-                if (targetColor == "red" || targetColor == "green")
-                {
-                    return "red_green";
-                }
-                else if (targetColor == "blue")
-                {
-                    return "red_blue_green";
-                }
-            }
-            else if (currentColor == "red_blue_green")
+            else if (currentColor != "red" && currentColor != "blue" && currentColor != "green")
             {
                 return "red_blue_green";
             }
@@ -949,9 +778,9 @@ namespace CodeDuku
         /// <param name="targetColor">The main color to apply ("red", "blue", or "green").</param>
         /// <param name="possibleIndex">The cell whose color and neighbors will be updated.</param>
         /// <param name="cellSize">The size of each cell on the canvas.</param>
-        /// <param name="languageDicts">Dictionary containing language-specific data for hint generation.</param>
+        /// <param name="languageDicts">Dictionary containing language-specific data for limiter generation.</param>
         /// <returns>Returns true if the coloring was successful; false if the target color is invalid or a drawing error occurs.</returns>
-        private static bool ColorHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, List<string> inputList, int requiredNumNeighbors)
+        private static bool ColorLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, string targetColor, CellData possibleIndex, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, List<string> inputList, string difficulty)
         {
             if (targetColor != "red" && targetColor != "blue" && targetColor != "green")
                 return false; // Invalid color, error
@@ -995,12 +824,12 @@ namespace CodeDuku
                     break;
             }
 
-            var hintValue = CalculateHint(validNeighborPositions, languageDicts, cellData);
-            cell.Letter = hintValue;
+            var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
+            cell.Letter = limiterValue;
             cellData[possibleIndex.Row][possibleIndex.Col] = cell;
             int phraseIndex = cellData[possibleIndex.Row][possibleIndex.Col].PhraseIndex;
-            var placedHint = new PlacedHint(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, hintValue, phraseIndex, requiredNumNeighbors);
-            hintsAdded.Add(placedHint);
+            var placedLimiter = new PlacedLimiter(possibleIndex.Row, possibleIndex.Col, targetColor, validNeighborPositions, limiterValue, phraseIndex, difficulty);
+            limitersAdded.Add(placedLimiter);
             if (!ModifyCanvas(canvas, cellData, possibleIndex.Row, possibleIndex.Col, cellSize))
                 return false;
 
@@ -1032,19 +861,17 @@ namespace CodeDuku
             return true;
         }
 
-        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, int numHints, ref bool uniquelySolvable, List<string> inputList, int requiredNumNeighbors)
+        private static bool CreateLimiter(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedLimiter> limitersAdded, int numLimiters, ref bool uniquelySolvable, List<string> inputList, string difficulty)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
-            List<CellData> possibleHints = new();
+            List<CellData> possibleLimiters = new();
             string[] baseColors = ["red", "blue", "green"];
             Random rand = new();
             string randomColor = baseColors[rand.Next(3)];
             bool hasValidNeighbor = false;
-            bool hasRequiredNumNeighbors = false;
-
-            if (requiredNumNeighbors < 1 || requiredNumNeighbors > 6)
-                throw new ArgumentException($"Invalid requiredNumNeighbors: {requiredNumNeighbors}. Must be between 1 and 6 inclusive.");
+            bool meetsDifficulty = false;
+            var overlapLevels = new Dictionary<string, int> { ["beginner"] = 1, ["novice"] = 2, ["intermediate"] = 3, ["expert"] = 4, ["master"] = 5 , ["legendary"] = 6 };
 
             for (int r = 0; r < nrows; r++)
             {
@@ -1061,101 +888,197 @@ namespace CodeDuku
                     switch (randomColor)
                     {
                         case "red":
+                            hasValidNeighbor = crossNeighbors.Any(cell =>
+                                !string.IsNullOrEmpty(cell.Letter) &&
+                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = crossNeighbors
                                 .Where(n => !string.IsNullOrEmpty(n.Letter) && !n.Letter.StartsWith('='))
                                 .Select(n => (row: n.Row, col: n.Col))
                                 .ToList();
-                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                         case "blue":
+                            hasValidNeighbor = diagNeighbors.Any(cell =>
+                                !string.IsNullOrEmpty(cell.Letter) &&
+                                !cell.Letter.StartsWith("="));
                             validNeighborPositions = diagNeighbors
                                 .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
                                 .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
-                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                         case "green":
-                            validNeighborPositions = diagNeighbors.Concat(crossNeighbors)
+                            hasValidNeighbor = allNeighbors.Any(cell =>
+                                !string.IsNullOrEmpty(cell.Letter) &&
+                                !cell.Letter.StartsWith("="));
+                            validNeighborPositions = diagNeighbors.Concat(crossNeighbors).ToList()
                                 .Where(cell => !string.IsNullOrEmpty(cell.Letter) && !cell.Letter.StartsWith('='))
                                 .Select(cell => (row: cell.Row, col: cell.Col))
                                 .ToList();
-                            hasValidNeighbor = validNeighborPositions.Count > 0;
                             break;
                     }
 
                     // Check if there is at least one lightgray neighbor
-                    // done to the hint provides new information to the player
-                    // this is not the only condition for a hint to provide new information
-                    // but including other hint positions requires more complex logic
+                    // done to the limiter provides new information to the player
+                    // this is not the only condition for a limiter to provide new information
+                    // but including other limiter positions requires more complex logic
                     bool hasLightGrayNeighbor = validNeighborPositions.Any(pos =>
                         cellData[pos.row][pos.col].ColorName == "lightgray");
 
-                    // Check if the cell meets the requiredNumNeighbors requirement of min neighbors
-                    hasRequiredNumNeighbors = requiredNumNeighbors == validNeighborPositions.Count;
+                    uniquelySolvable = VerifyUnique(cellData, validNeighborPositions, limitersAdded, numLimiters, ref uniquelySolvable, languageDicts, inputList, hasValidNeighbor, hasLightGrayNeighbor);
 
-                    if (hasValidNeighbor && hasLightGrayNeighbor && hasRequiredNumNeighbors)
+                    // Check if the cell meets the difficulty requirement of min neighbors
+                    int minCells = 0;
+                    if (!overlapLevels.TryGetValue(difficulty, out minCells))
+                        throw new ArgumentException($"Invalid difficulty level: {difficulty}");
+                    meetsDifficulty = minCells == validNeighborPositions.Count;
+
+                    if (hasValidNeighbor && hasLightGrayNeighbor && uniquelySolvable && meetsDifficulty)
                     {
-                        possibleHints.Add(cellData[r][c]);
+                        possibleLimiters.Add(cellData[r][c]);
                     }
                 }
             }
 
-            if (possibleHints.Count == 0)
+            if (possibleLimiters.Count == 0)
                 return false;
 
-            // Find the hint position that is farthest from all existing hints
-            CellData bestHint = possibleHints[0];
-            double maxMinDistance = 0;
+            possibleLimiters = possibleLimiters.OrderBy(_ => rand.Next()).ToList();
 
-            foreach (var candidate in possibleHints)
-            {
-                double minDistanceToExistingHints = double.MaxValue;
-
-                // Calculate minimum distance to any existing hint
-                foreach (var existingHint in hintsAdded)
-                {
-                    double distance = Math.Sqrt(
-                        Math.Pow(candidate.Row - existingHint.Row, 2) +
-                        Math.Pow(candidate.Col - existingHint.Col, 2)
-                    );
-                    minDistanceToExistingHints = Math.Min(minDistanceToExistingHints, distance);
-                }
-
-                // If no existing hints, use the first candidate or randomize
-                if (hintsAdded.Count == 0)
-                {
-                    minDistanceToExistingHints = double.MaxValue;
-                }
-
-                // Select candidate with maximum minimum distance (farthest from any existing hints)
-                if (minDistanceToExistingHints > maxMinDistance)
-                {
-                    maxMinDistance = minDistanceToExistingHints;
-                    bestHint = candidate;
-                }
-                else if (Math.Abs(minDistanceToExistingHints - maxMinDistance) < 0.001) // Equal distances
-                {
-                    // Break ties randomly
-                    if (rand.Next(2) == 0)
-                    {
-                        bestHint = candidate;
-                    }
-                }
-            }
-
-            Console.WriteLine($"[Hint] Placing hint at ({bestHint.Row},{bestHint.Col}) with min distance {maxMinDistance:F2} from existing hints");
-
-            return ColorHint(cellData, canvas, colors, randomColor, bestHint, cellSize, languageDicts, ref hintsAdded, inputList, requiredNumNeighbors);
+            return ColorLimiter(cellData, canvas, colors, randomColor, possibleLimiters[0], cellSize, languageDicts, ref limitersAdded, inputList, difficulty);
         }
 
         /// <summary>
-        /// Clears all letters from the grid (cellData) and optionally updates the canvas,
-        /// except for cells where the letter starts with '=' (e.g., hints).
+        /// Checks whether the current limiter placement makes the solution uniquely solvable.
+        /// Updates the 'uniquelySolvable' flag accordingly.
+        /// Returns false if validation cannot proceed (e.g., not all neighbors are from the same phrase).
+        /// return value is always true if (limitersAdded.Count != numLimiters - 1). Intended.
+        /// </summary>
+        private static bool VerifyUnique(
+            List<List<CellData>> cellData,
+            List<(int row, int col)> validNeighborPositions,
+            List<PlacedLimiter> limitersAdded,
+            int numLimiters,
+            ref bool uniquelySolvable,
+            Dictionary<string, object> languageDicts,
+            List<string> inputList,
+            bool hasValidNeighbor,
+            bool hasLightGrayNeighbor)
+        {
+            if ((limitersAdded.Count == numLimiters - 1) && !uniquelySolvable) // final limiter
+            {
+                if (validNeighborPositions.Count > 0 && hasValidNeighbor && hasLightGrayNeighbor)
+                {
+                    List<string> matchesIntersections = new();
+                    int baseRow = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseRow;
+                    int baseCol = cellData[validNeighborPositions[0].row][validNeighborPositions[0].col].BaseCol;
+                    int firstPhraseIndex = cellData[baseRow][baseCol].PhraseIndex;
+                    bool allSamePhrase = validNeighborPositions.All(pos => cellData[pos.row][pos.col].PhraseIndex == firstPhraseIndex);
+                    var limiterValueOriginal = CalculateLimiter(validNeighborPositions, languageDicts, cellData);
+                    if (!allSamePhrase)
+                    {
+                        return false;
+                    }
+                    var candidates = inputList.Where(w => w.Length == inputList[firstPhraseIndex].Length && w != inputList[firstPhraseIndex]).ToList();
+                    var cellDataCopy = cellData.Select(row => row.Select(cell => cell).ToList()).ToList();
+
+                    // Determine indexes in the word where there is an adjacent (non-empty) cell
+                    List<int> constrainedPositions = new();
+                    for (int i = 0; i < inputList[firstPhraseIndex].Length; i++)
+                    {
+                        int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                        int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                        if (cellData[baseRow][baseCol].DrawRight) // Check above and below
+                        {
+                            bool aboveHasValue = tmpRow > 0 && !string.IsNullOrEmpty(cellData[tmpRow - 1][tmpCol].Letter);
+                            bool belowHasValue = tmpRow < cellData.Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow + 1][tmpCol].Letter);
+                            if (aboveHasValue || belowHasValue)
+                                constrainedPositions.Add(i);
+                        }
+                        else // Check left and right
+                        {
+                            bool leftHasValue = tmpCol > 0 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol - 1].Letter);
+                            bool rightHasValue = tmpCol < cellData[0].Count - 1 && !string.IsNullOrEmpty(cellData[tmpRow][tmpCol + 1].Letter);
+                            if (leftHasValue || rightHasValue)
+                                constrainedPositions.Add(i);
+                        }
+                    }
+                    // For each candidate, check if the constrainedPositions match between the base word and the candidate
+                    foreach (var candidate in candidates)
+                    {
+                        bool allMatch = constrainedPositions.All(pos => candidate[pos] == inputList[firstPhraseIndex][pos]);
+                        if (allMatch)
+                        {
+                            matchesIntersections.Add(candidate);
+                        }
+                    }
+
+                    // verify limiter value calculation at indexes results in different answer
+                    foreach (var match in matchesIntersections)
+                    {
+                        for (int i = 0; i < match.Length; i++)
+                        {
+                            int tmpRow = baseRow + (cellData[baseRow][baseCol].DrawRight ? 0 : i);
+                            int tmpCol = baseCol + (cellData[baseRow][baseCol].DrawRight ? i : 0);
+
+                            var cellCopy = cellDataCopy[tmpRow][tmpCol];
+                            cellCopy.Letter = match[i].ToString();
+                            cellDataCopy[tmpRow][tmpCol] = cellCopy;
+                        }
+                        var limiterValue = CalculateLimiter(validNeighborPositions, languageDicts, cellDataCopy);
+                        if (limiterValue == limiterValueOriginal)
+                        {
+                            return false;
+                        }
+                        uniquelySolvable = true;
+                    }
+                }
+            }
+            return true;
+        }
+
+
+        /// <summary>
+        /// Checks if a given phrase placement is unique in the crossword context.
+        /// </summary>
+        /// <param name="cellData">The crossword grid.</param>
+        /// <param name="phraseInfo">The phrase placement to check.</param>
+        /// <param name="inputNames">All possible input words.</param>
+        /// <returns>True if the phrase placement is unique, false otherwise.</returns>
+        private static bool IsLimiterUnique(List<List<CellData>> cellData, PhraseStruct phraseInfo, List<string> inputNames)
+        {
+            string baseWord = phraseInfo.Phrase;
+            foreach (var candidate in inputNames)
+            {
+                if (candidate.Length != baseWord.Length || candidate == baseWord)
+                    continue;
+
+                // Add further uniqueness logic here as needed.
+            }
+            // Placeholder: always returns true for now.
+            return true;
+        }
+
+
+
+        /// <summary>
+        /// Resets key variables to their initial state for puzzle generation.
+        /// </summary>
+        /// <param name="cellData">The crossword grid to be cleared and reset.</param>
+        /// <param name="inputsAdded">The list of inputs that have already been added to the grid.</param>
+        private static void ResetVariables(ref List<List<CellData>> cellData, ref List<PhraseStruct> inputsAdded)
+        {
+            cellData = new List<List<CellData>>();
+            inputsAdded = new List<PhraseStruct>();
+        }
+
+        /// <summary>
+        /// Clears all letters from the grid (cellData) and updates the canvas,
+        /// except for cells where the letter starts with '=' (e.g., limiters).
         /// </summary>
         /// <param name="cellData">The 2D list representing the puzzle grid.</param>
-        /// <param name="canvas">The SKCanvas on which to redraw the cleared grid. Can be null to skip canvas updates.</param>
-        /// <param name="cellSize">The size of each cell in pixels. Ignored if canvas is null.</param>
-        private static void ClearGridLetters(ref List<List<CellData>> cellData, SKCanvas? canvas = null, int cellSize = 0)
+        /// <param name="canvas">The SKCanvas on which to redraw the cleared grid.</param>
+        /// <param name="cellSize">The size of each cell in pixels.</param>
+        private static void ClearGridLetters(ref List<List<CellData>> cellData, SKCanvas canvas, int cellSize)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -1172,504 +1095,10 @@ namespace CodeDuku
                         cell.Letter = "";
                         cellData[r][c] = cell;
 
-                        // Only update canvas if one was provided
-                        if (canvas != null)
-                        {
-                            ModifyCanvas(canvas, cellData, r, c, cellSize);
-                        }
+                        ModifyCanvas(canvas, cellData, r, c, cellSize);
                     }
                 }
             }
         }
-
-        /// <summary>
-        /// Pre-compiled hint validation structure for fast constraint checking
-        /// </summary>
-        private struct PrecompiledHint
-        {
-            public int Row;
-            public int Col;
-            public int ExpectedMod;
-            public (int r, int c)[] NeighborPositions;
-            public bool IsValid;
-            public HashSet<char> ValidChars; // Pre-computed valid characters for each position
-        }
-
-        /// <summary>
-        /// Pre-compiles hint validation logic for forward checking optimization
-        /// </summary>
-        private static PrecompiledHint[] PrecompileHints(List<PlacedHint> hintsAdded, Dictionary<char, int> charToInt, List<List<CellData>> cellData)
-        {
-            var precompiledHints = new PrecompiledHint[hintsAdded.Count];
-
-            for (int i = 0; i < hintsAdded.Count; i++)
-            {
-                var hint = hintsAdded[i];
-                string hintValue = cellData[hint.Row][hint.Col].Letter;
-
-                // Pre-validate hint format ONCE and get expectedMod
-                int expectedMod = -1;
-                bool isValid = hintValue.Length >= 2 && charToInt.TryGetValue(hintValue[1], out expectedMod);
-
-                // Pre-compute valid characters for constraint satisfaction
-                var validChars = new HashSet<char>();
-                if (isValid)
-                {
-                    foreach (var kvp in charToInt)
-                    {
-                        validChars.Add(kvp.Key);
-                    }
-                }
-
-                precompiledHints[i] = new PrecompiledHint
-                {
-                    Row = hint.Row,
-                    Col = hint.Col,
-                    ExpectedMod = expectedMod,
-                    NeighborPositions = hint.NeighborPositions.ToArray(), // Convert to array for faster access
-                    IsValid = isValid,
-                    ValidChars = validChars
-                };
-            }
-
-            return precompiledHints;
-        }
-
-        /// <summary>
-        /// Fast hint validation using pre-compiled constraints with forward checking
-        /// </summary>
-        private static bool ValidatePrecompiledHints(PrecompiledHint[] precompiledHints, List<List<CellData>> workingGrid, Dictionary<char, int> charToInt)
-        {
-            foreach (var hint in precompiledHints)
-            {
-                if (!hint.IsValid) return false; // Pre-validated format check
-
-                int sum = 0;
-                int emptyCount = 0;
-
-                // Use pre-converted array instead of List for faster iteration
-                foreach (var (nr, nc) in hint.NeighborPositions)
-                {
-                    var letter = workingGrid[nr][nc].Letter;
-                    if (!string.IsNullOrEmpty(letter) && charToInt.TryGetValue(letter[0], out int value))
-                        sum += value;
-                    else if (string.IsNullOrEmpty(letter))
-                        emptyCount++;
-                }
-
-                if (emptyCount == 0)
-                {
-                    // All neighbors filled - exact check
-                    if (sum % 62 != hint.ExpectedMod) return false;
-                }
-                else
-                {
-                    // Forward checking: can we reach the target with remaining empty cells?
-                    int currentMod = sum % 62;
-                    int neededDiff = (hint.ExpectedMod - currentMod + 62) % 62;
-                    int maxPossibleIncrease = emptyCount * 61;
-
-                    if (neededDiff > maxPossibleIncrease) return false;
-                }
-            }
-            return true;
-        }
-
-        /// <summary>
-        /// Performs forward checking to see if placing a character at a position violates any hint constraints
-        /// </summary>
-        private static bool ForwardCheckPlacement(char placedChar, int placedRow, int placedCol, PrecompiledHint[] precompiledHints, List<List<CellData>> workingGrid, Dictionary<char, int> charToInt)
-        {
-            if (!charToInt.TryGetValue(placedChar, out int placedValue))
-                return false;
-
-            // Check each hint that includes this position
-            foreach (var hint in precompiledHints)
-            {
-                if (!hint.IsValid) continue;
-
-                // Check if this position affects this hint
-                bool affectsHint = false;
-                foreach (var (nr, nc) in hint.NeighborPositions)
-                {
-                    if (nr == placedRow && nc == placedCol)
-                    {
-                        affectsHint = true;
-                        break;
-                    }
-                }
-
-                if (!affectsHint) continue;
-
-                // Calculate new constraint state with this placement
-                int sum = placedValue; // Include the new character
-                int emptyCount = 0;
-
-                foreach (var (nr, nc) in hint.NeighborPositions)
-                {
-                    if (nr == placedRow && nc == placedCol) continue; // Already counted
-
-                    var letter = workingGrid[nr][nc].Letter;
-                    if (!string.IsNullOrEmpty(letter) && charToInt.TryGetValue(letter[0], out int value))
-                        sum += value;
-                    else if (string.IsNullOrEmpty(letter))
-                        emptyCount++;
-                }
-
-                // Check if constraint can still be satisfied
-                if (emptyCount == 0)
-                {
-                    // All positions filled - must match exactly
-                    if (sum % 62 != hint.ExpectedMod) return false;
-                }
-                else
-                {
-                    // Check if remaining empty cells can complete the constraint
-                    int currentMod = sum % 62;
-                    int neededDiff = (hint.ExpectedMod - currentMod + 62) % 62;
-                    int maxPossibleIncrease = emptyCount * 61;
-
-                    if (neededDiff > maxPossibleIncrease) return false;
-                }
-            }
-
-            return true;
-        }
-
-        // This does currently work
-        // it outputs all found solutions to their own files
-        // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts, List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots, Dictionary<int, (int r, int c)[]> slotPositions)
-        {
-            Console.WriteLine("Beginning: makePuzzleUnique");
-            int nrows = cellData.Count;
-            int ncols = cellData[0].Count;
-            var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
-
-
-            // Store the original cellData state for restoration later
-            var originalCellData = cellData.Select(row => new List<CellData>(row)).ToList();
-
-            // Clear the grid letters (but preserve hints) for solving
-            ClearGridLetters(ref cellData);
-
-            // Create a working copy of the cleared cellData for the solving algorithm
-            var workingGrid = cellData.Select(row => new List<CellData>(row)).ToList();
-
-            Console.WriteLine($"[Solver] Using {slots.Count} pre-built slots with pre-calculated positions");
-
-            // Pre-compile hint validation logic for forward checking
-            var precompiledHints = PrecompileHints(hintsAdded, charToInt, cellData);
-            Console.WriteLine($"[Solver] Pre-compiled {precompiledHints.Length} hints for forward checking");
-
-            // Set up hints and language dictionaries
-            var hints = new List<(int row, int col, string value, List<(int, int)> neighbors)>();
-            foreach (var placedHint in hintsAdded)
-            {
-                string hintValue = cellData[placedHint.Row][placedHint.Col].Letter;
-                hints.Add((placedHint.Row, placedHint.Col, hintValue, placedHint.NeighborPositions));
-            }
-            Console.WriteLine($"[Solver] Found {hints.Count} hints.");
-
-
-            // Stack to manage state for iterative solving
-            // Each entry contains: (slotIndex, wordIndex, list of placed positions)
-            var stack = new Stack<(int slotIdx, int wordIdx, List<(int r, int c)> placements)>();
-            stack.Push((0, -1, new List<(int, int)>())); // Start with first slot, no word tried yet
-
-            Console.WriteLine("[Solver] Starting crossword solver...");
-
-            while (stack.Count > 0)
-            {
-                var (slotIdx, lastWordIdx, previousPlacements) = stack.Pop();
-                //Console.WriteLine("Backtracked");
-                // Clear previous placements when backtracking
-                foreach (var (r, c) in previousPlacements)
-                {
-                    var cell = workingGrid[r][c];
-                    cell.Letter = "";
-                    workingGrid[r][c] = cell;
-                }
-
-                if (slotIdx == slots.Count)
-                {
-                    Console.WriteLine("[Solver] All slots filled. Solution found!");
-
-                    // Check if this solution is different from the original
-                    bool isDifferentFromOriginal = false;
-                    var differingCells = new List<(int row, int col)>();
-                    for (int r = 0; r < nrows; r++)
-                    {
-                        for (int c = 0; c < ncols; c++)
-                        {
-                            // Compare the letter content between working grid and original
-                            string workingLetter = workingGrid[r][c].Letter;
-                            string originalLetter = originalCellData[r][c].Letter;
-
-                            // Skip hint cells (start with =) when comparing
-                            if (!string.IsNullOrEmpty(originalLetter) && !originalLetter.StartsWith("="))
-                            {
-                                if (!string.Equals(workingLetter, originalLetter, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    isDifferentFromOriginal = true;
-                                    differingCells.Add((r, c));
-                                    ///Console.WriteLine($"[Solver] Letter difference found at ({r},{c}): working='{workingLetter}' vs original='{originalLetter}'");
-                                }
-                            }
-                        }
-                    }
-
-                    // Only add to alternate solutions if it's different from the original
-                    if (isDifferentFromOriginal)
-                    {
-                        Console.WriteLine("[Solver] Found alternate solution!");
-
-                        // Export the alternate solution before returning
-                        using var altBitmap = new SKBitmap(ncols * cellSize, nrows * cellSize);
-                        using var altCanvas = new SKCanvas(altBitmap);
-
-                        //Restore the original cellData state before returning
-                        for (int r = 0; r < nrows; r++)
-                        {
-                            cellData[r] = new List<CellData>(originalCellData[r]);
-                        }
-                        UpdateFullCanvas(canvas, cellData, cellSize);
-
-                        return (false, FindCellWithMostNeighborDifferences(cellData, differingCells));
-                    }
-                    else
-                    {
-                        Console.WriteLine("[Solver] Found original solution - skipping");
-                    }
-                    continue;
-                }
-
-                var slot = slots[slotIdx];
-                //Console.WriteLine($"[Solver] Trying slot #{slotIdx}");
-
-                // Get candidate words for this slot length - optimized lookup
-                if (!wordsByLength.TryGetValue(slot.length, out var candidateWordIndices))
-                    continue; // No words of this length
-
-                // Try each remaining word of the correct length - optimized to skip already tried words
-                foreach (int wordIdx in candidateWordIndices.Where(idx => idx > lastWordIdx))
-                {
-                    string word = inputNames[wordIdx];
-
-                    // Get pre-calculated coordinate positions for this slot
-                    var wordPositions = slotPositions[slotIdx];
-
-                    // Check if word fits and passes forward checking
-                    bool fits = true;
-                    for (int i = 0; i < word.Length; i++)
-                    {
-                        var (r, c) = wordPositions[i];
-                        var cell = workingGrid[r][c];
-                        if (!string.IsNullOrEmpty(cell.Letter) &&
-                            char.ToLower(cell.Letter[0]) != char.ToLower(word[i]))
-                        {
-                            fits = false;
-                            break;
-                        }
-
-                        // Forward checking: test if placing this character would violate constraints
-                        if (string.IsNullOrEmpty(cell.Letter) &&
-                            !ForwardCheckPlacement(word[i], r, c, precompiledHints, workingGrid, charToInt))
-                        {
-                            fits = false;
-                            break;
-                        }
-                    }
-                    if (!fits) continue;
-
-                    // Place the word
-                    var placedPositions = new List<(int, int)>();
-                    for (int i = 0; i < word.Length; i++)
-                    {
-                        var (r, c) = wordPositions[i];
-                        if (string.IsNullOrEmpty(workingGrid[r][c].Letter))
-                        {
-                            var cell = workingGrid[r][c];
-                            cell.Letter = $"{word[i]}";
-                            workingGrid[r][c] = cell;
-                            placedPositions.Add((r, c));
-                        }
-                    }
-
-                    // Check hints using optimized precompiled validation
-                    bool allHintsOk = ValidatePrecompiledHints(precompiledHints, workingGrid, charToInt);
-
-                    if (allHintsOk)
-                    {
-                        //Console.WriteLine($"[Solver] Placed '{word}' at ({slot.row},{slot.col})");
-                        // Save current state for backtracking
-                        stack.Push((slotIdx, wordIdx, placedPositions));
-                        // Move to next slot
-                        stack.Push((slotIdx + 1, -1, new List<(int, int)>()));
-                        break;
-                    }
-                    else
-                    {
-                        // Undo placement and try next word
-                        foreach (var (r, c) in placedPositions)
-                        {
-                            var cell = workingGrid[r][c];
-                            cell.Letter = "";
-                            workingGrid[r][c] = cell;
-                        }
-                    }
-                }
-
-                // if (!foundValidWord)
-                // {
-                // Console.WriteLine($"[Solver] No valid candidates for slot #{slotIdx}");
-                // }
-            }
-
-            Console.WriteLine("[Solver] No alternate solutions found.");
-
-            // Restore the original cellData state - optimized row copying
-            for (int r = 0; r < nrows; r++)
-            {
-                cellData[r] = new List<CellData>(originalCellData[r]);
-            }
-            UpdateFullCanvas(canvas, cellData, cellSize);
-
-            return (true, default); // Return true if no alternate solutions found
-        }
-
-        /// <summary>
-        /// Finds the cell where neighbors have the most overlapping different letters between two cell grids.
-        /// </summary>
-        /// <param name="cellData">The original cell grid</param>
-        /// <param name="differingCells">List of coordinates where the two grids differ</param>
-        /// <returns>A tuple containing the row and column coordinates of the best cell, and a string describing the type</returns>
-        private static ((int row, int col), string type) FindCellWithMostNeighborDifferences(List<List<CellData>> cellData, List<(int row, int col)> differingCells)
-        {
-            List<string> validColors = new List<string> { "lightgray", "red", "blue", "green", "red_blue", "red_green", "blue_green", "red_blue_green" };
-            CellData bestCrossCell = new CellData();
-            CellData bestDiagCell = new CellData();
-            int maxCrossDifferences = 0;
-            int maxDiagDifferences = 0;
-            Random rand = new Random();
-
-            // Randomly select search direction and order (8 combinations: 4 corners x 2 iteration orders)
-            bool reverseRows = rand.Next(2) == 1;
-            bool reverseCols = rand.Next(2) == 1;
-            bool rowsFirst = rand.Next(2) == 1;
-            
-            var rowRange = reverseRows ? Enumerable.Range(0, cellData.Count).Reverse() : Enumerable.Range(0, cellData.Count);
-            var colRange = reverseCols ? Enumerable.Range(0, cellData[0].Count).Reverse() : Enumerable.Range(0, cellData[0].Count);
-            var searchOrder = rowsFirst ? 
-                from c in colRange from r in rowRange select (r, c) : 
-                from r in rowRange from c in colRange select (r, c);
-
-            // Check each cell using the selected search pattern
-            foreach (var (diffRow, diffCol) in searchOrder)
-            {
-                var currentCell = cellData[diffRow][diffCol];
-                if (!currentCell.ColorName.Equals("white")) continue;
-                var (diagNeighbors, crossNeighbors) = GetNeighbors(cellData, currentCell, true);
-
-                bool hasLightGreyCross = false;
-                bool hasLightGreyDiag = false;
-                hasLightGreyCross = crossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
-                hasLightGreyDiag = diagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
-
-                if (diagNeighbors.Count == 0 && crossNeighbors.Count == 0) continue;
-                if (!hasLightGreyCross && !hasLightGreyDiag) continue;
-
-                int crossDifferenceCount = 0;
-                int diagDifferenceCount = 0;
-
-                if (hasLightGreyCross) // require gain new information
-                { // Count cross neighbors that are in the differing cells list
-                    foreach (var neighbor in crossNeighbors)
-                    {
-                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
-                        {
-                            crossDifferenceCount++;
-                        }
-                    }
-                }
-
-                if (hasLightGreyDiag)
-                {
-                    foreach (var neighbor in diagNeighbors)
-                    {// Count diagonal neighbors that are in the differing cells list
-                        if (differingCells.Contains((neighbor.Row, neighbor.Col)))
-                        {
-                            diagDifferenceCount++;
-                        }
-                    }
-                }
-
-                // Update best cross cell if this one has more cross differences
-                if (crossDifferenceCount > maxCrossDifferences)
-                {
-                    maxCrossDifferences = crossDifferenceCount;
-                    bestCrossCell = currentCell;
-                }
-
-                // Update best diagonal cell if this one has more diagonal differences
-                if (diagDifferenceCount > maxDiagDifferences)
-                {
-                    maxDiagDifferences = diagDifferenceCount;
-                    bestDiagCell = currentCell;
-                }
-            }
-
-            // Choose the best overall cell (cross vs diagonal)
-            (int row, int col) bestPosition;
-            string bestType;
-
-            if (maxCrossDifferences > maxDiagDifferences)
-            {
-                bestPosition = (bestCrossCell.Row, bestCrossCell.Col);
-                bestType = "red";
-                Console.WriteLine($"[Analysis] Found best cross cell at ({bestPosition.row},{bestPosition.col}) with {maxCrossDifferences} differing cross neighbors");
-            }
-            else if (maxCrossDifferences < maxDiagDifferences)
-            {
-                bestPosition = (bestDiagCell.Row, bestDiagCell.Col);
-                bestType = "blue";
-                Console.WriteLine($"[Analysis] Found best diagonal cell at ({bestPosition.row},{bestPosition.col}) with {maxDiagDifferences} differing diagonal neighbors");
-            }
-            else
-            {
-                // Equal counts - choose randomly
-                var bestCell = rand.Next(2) == 0 ? bestCrossCell : bestDiagCell;
-                bestPosition = (bestCell.Row, bestCell.Col);
-                bestType = bestCell.Equals(bestCrossCell) ? "red" : "blue";
-                Console.WriteLine($"[Analysis] Randomly selected {bestType} cell at ({bestPosition.row},{bestPosition.col}) with {maxCrossDifferences} differing neighbors");
-            }
-
-            // Only randomly override if the other cell type also has some differing neighbors
-            var (greenDiagNeighbors, greenCrossNeighbors) = GetNeighbors(cellData, new CellData(row: bestPosition.row, col: bestPosition.col), true);
-            bool hasLightGrey = false;
-            if (bestType.Equals("red") && greenDiagNeighbors.Count > 0)
-            {
-                hasLightGrey = greenDiagNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
-            }
-            else if (bestType.Equals("blue") && greenCrossNeighbors.Count > 0)
-            {
-                hasLightGrey = greenCrossNeighbors.Any(n => n.ColorName.Equals("lightgray", StringComparison.OrdinalIgnoreCase));
-            }
-            if (hasLightGrey && rand.Next(100) < 15)
-            {
-                bestType = "green";
-                Console.WriteLine($"[Analysis] Switched to diagonal cell due to lightgray neighbor at ({bestPosition.row},{bestPosition.col})");
-            }
-            // Old code that does not take into account the green adding new info (has new lightgray cell)
-            // if (maxCrossDifferences > 0 && maxDiagDifferences > 0 && rand.Next(100) < 20)
-            // {
-            //     bestType = "green";
-            //     Console.WriteLine($"[Analysis] Randomly overriding to green for cell at ({bestPosition.row},{bestPosition.col})");
-            // }
-
-            return (bestPosition, bestType);
-        }
-        
-        
     }
 }
