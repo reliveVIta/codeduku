@@ -1,4 +1,4 @@
-using SkiaSharp;
+﻿using SkiaSharp;
 
 namespace CodeDuku
 {
@@ -96,6 +96,7 @@ namespace CodeDuku
             int numHints = 10;
             string filename = "crossword";
             string extension = ".png";
+            double desiredRatio = .9; //Hard: 0.75 hints / word. Easy: 2 hints / word. Ratios need tuning. These are ideas
 
             // key is required number of neighbors for the cell, value is weight
             // required number of neighbors for each hint is randomly selected based on these weights
@@ -118,7 +119,7 @@ namespace CodeDuku
             DefineColors(colors);
             InitializeCanvas(nrows, ncols, canvas, cellSize);
 
-            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, requiredNumNeighborsWeights, bitmap);
+            CreatePuzzle(ref cellData, inputNames, canvas, languageDicts, colors, cellSize, numWords: numWords, numHints: numHints, requiredNumNeighborsWeights, bitmap, desiredRatio);
             ExportPuzzle(bitmap, filename: filename + extension);
 
             ClearGridLetters(ref cellData, canvas, cellSize);
@@ -137,6 +138,7 @@ namespace CodeDuku
         /// <param name="numWords">Number of words to place in the puzzle.</param>
         /// <param name="numHints">Number of Hints to generate.</param>
         /// <param name="requiredNumNeighborsWeights">String indicating weights for the number of neighbors hints should have.</param>
+        /// <param name="desiredRatio">Double specifing the ratio of hints to words.</param>
         /// <returns>The updated crossword grid with placed words and hints.</returns>
         private static List<List<CellData>> CreatePuzzle(
             ref List<List<CellData>> cellData,
@@ -148,7 +150,8 @@ namespace CodeDuku
             int numWords,
             int numHints,
             Dictionary<int, float> requiredNumNeighborsWeights,
-            SKBitmap bitmap)
+            SKBitmap bitmap,
+            double desiredRatio)
         {
             if (numWords <= 0)
                 throw new ArgumentException("numWords must be greater than 0");
@@ -159,78 +162,186 @@ namespace CodeDuku
                 throw new ArgumentException("numNeighbors weights must sum to 1.0");
             }
 
-            Random rand = new Random();
-            List<int> weightedPool = new();
-
-            foreach (var pair in requiredNumNeighborsWeights)
-            {
-                int count = (int)(pair.Value * 10);
-                for (int i = 0; i < count; i++)
-                {
-                    weightedPool.Add(pair.Key);
-                }
-            }
+            List<int> weightedPool = CreateWeightedPool(requiredNumNeighborsWeights);
 
             List<PhraseStruct> inputsAdded = new List<PhraseStruct>();
             List<PlacedHint> HintsAdded = new List<PlacedHint>();
             bool puzzleIsUniquelySolvable = true;
 
             inputsAdded = DrawSeedWord(ref cellData, inputNames, canvas, cellSize);
-
             for (int i = 0; i < numWords - 1; i++)
             {
                 DrawRandomWord(ref cellData, inputNames, ref inputsAdded, canvas, cellSize);
             }
 
+            AddNumHints(numHints, cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, inputNames, weightedPool);
+
+            UpdateFullCanvas(canvas, cellData, cellSize);
+            ExportPuzzle(bitmap, filename: "crossword_unique_step_0.png");
+
+            Dictionary<int, List<int>> wordsByLength = CreateWordsByLength(inputNames); // Pre-filter words by length for faster lookup
+            List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = CreateSlots(cellData, inputNames); // Pre-build slots once outside the loop
+            Dictionary<int, (int r, int c)[]> slotPositions = PreCalculateSlotPositions(slots); // Pre-calculate all coordinate positions for each slot
+            
+            puzzleIsUniquelySolvable = false;
+            int j = 1;
+            while (!puzzleIsUniquelySolvable)
+            {
+                var returnValue = TryMakePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts, slots, slotPositions);
+                puzzleIsUniquelySolvable = returnValue.isUnique;
+                var bestIndex = returnValue.bestHint.bestIndex;
+                var bestColor = returnValue.bestHint.color;
+                if (!puzzleIsUniquelySolvable)
+                {
+                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, 1);
+                    UpdateFullCanvas(canvas, cellData, cellSize);
+                    ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
+                    Console.WriteLine($"[Solver] Exported alternate solution to crossword_unique_step_{j}.png");
+                    j++;
+                }
+            }
+
+            // Modify puzzle by adding hints to reach desired ratio of hints to words
+            int finalNumHints = numHints + j - 1;
+            double hintWordRatio = (double)finalNumHints / (double)numWords;
+            int additionalHintsNeeded = (int)Math.Ceiling(desiredRatio * numWords) - finalNumHints;
+            Console.WriteLine($"[Ratio Modifier] Additional hints needed to reach desired ratio of {desiredRatio}: {additionalHintsNeeded}");
+            hintWordRatio = (double)finalNumHints / (double)numWords;
+            if (additionalHintsNeeded > 0)
+            {
+                Console.WriteLine($"[Ratio Modifier] Before adding hints, Created puzzle has {finalNumHints} hints && {numWords} phrases with a ratio of {hintWordRatio.ToString("F3")}");
+                Console.WriteLine($"[Ratio Modifier] Adding {additionalHintsNeeded} to go from current ratio of {hintWordRatio.ToString("F3")} with {finalNumHints} hints to desired ratio of {desiredRatio} with {finalNumHints + additionalHintsNeeded} hints");
+                AddNumHints(additionalHintsNeeded, cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, inputNames, weightedPool);
+                finalNumHints += additionalHintsNeeded;
+                hintWordRatio = (double)finalNumHints / (double)numWords;
+                Console.WriteLine($"[Ratio Modifier] After adding hints, Created puzzle has {finalNumHints} hints && {numWords} phrases with a ratio of {hintWordRatio.ToString("F3")}");
+            }
+            else
+            {
+                Console.WriteLine($"[Ratio Modifier] Can not add {additionalHintsNeeded} to go from current ratio of {hintWordRatio.ToString("F3")} with {finalNumHints} hints to desired ratio of {desiredRatio} with {finalNumHints + additionalHintsNeeded} hints");
+                Console.WriteLine("[Ratio Modifier] Generate a new puzzle to have a chance to reach the desired ratio");
+            }
+            UpdateFullCanvas(canvas, cellData, cellSize);
+            ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
+            j += 1;
+
+            Console.WriteLine($"[Result] Final puzzle is " + (puzzleIsUniquelySolvable ? "unique" : "non-unique"));
+            return cellData;
+        }
+
+
+        /// <summary>
+        /// Adds the specified number of hints to the crossword puzzle by repeatedly attempting to create hints
+        /// with weighted random neighbor requirements. If hint creation fails, it steps down the difficulty
+        /// until a valid hint can be placed or the minimum difficulty is reached.
+        /// </summary>
+        /// <param name="numHints">The number of hints to add to the puzzle</param>
+        /// <param name="cellData">The 2D crossword grid to add hints to</param>
+        /// <param name="canvas">The SKCanvas for drawing the hints</param>
+        /// <param name="colors">Dictionary mapping color names to SKColor values</param>
+        /// <param name="cellSize">Size in pixels of each grid cell</param>
+        /// <param name="languageDicts">Dictionary containing character-to-integer mappings</param>
+        /// <param name="HintsAdded">Reference to the list of placed hints, updated as hints are added</param>
+        /// <param name="inputNames">List of input words for phrase index reference</param>
+        /// <param name="weightedPool">Pre-computed weighted pool for selecting neighbor requirements</param>
+        private static void AddNumHints(int numHints, List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> HintsAdded, List<string> inputNames, List<int> weightedPool)
+        {
+            Random rand = new Random();
+
             for (int i = 0; i < numHints; i++)
             {
-                bool uniquelySolvable = false; // reset for each Hint. unnecessary.
-                // valid requiredNumNeighbors: 1, 2, 3, 4, 5, 6
                 int requiredNumNeighbors = weightedPool.OrderBy(_ => rand.Next()).ToList()[0];
-                Console.WriteLine($"Selected requiredNumNeighbors: {requiredNumNeighbors}");
+                //Console.WriteLine($"Selected requiredNumNeighbors: {requiredNumNeighbors}");
 
                 bool HintCreated = false;
 
                 while (!HintCreated)
                 {
-                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, numHints, ref uniquelySolvable, inputNames, requiredNumNeighbors);
+                    HintCreated = CreateHint(cellData, canvas, colors, cellSize, languageDicts, ref HintsAdded, inputNames, requiredNumNeighbors);
 
                     if (!HintCreated)
                     {
-                        Console.WriteLine($"Failed to create Hint with requiredNumNeighbors '{requiredNumNeighbors}'. Stepping down requiredNumNeighbors and retrying...");
+                        //Console.WriteLine($"Failed to create Hint with requiredNumNeighbors '{requiredNumNeighbors}'. Stepping down requiredNumNeighbors and retrying...");
                         int steppedDownRequiredNumNeighbors = StepDownRequiredNumNeighbors(requiredNumNeighbors);
                         if (steppedDownRequiredNumNeighbors != requiredNumNeighbors)
                         {
-                            Console.WriteLine($"Retrying with requiredNumNeighbors '{steppedDownRequiredNumNeighbors}'");
+                            //Console.WriteLine($"Retrying with requiredNumNeighbors '{steppedDownRequiredNumNeighbors}'");
                             requiredNumNeighbors = steppedDownRequiredNumNeighbors;
                         }
-                        else
+                        else // Already at minimum requiredNumNeighbors level -> skipping this hint
                         {
-                            Console.WriteLine($"Already at minimum requiredNumNeighbors level ({requiredNumNeighbors}), skipping this hint");
+                            //Console.WriteLine($"Already at minimum requiredNumNeighbors level ({requiredNumNeighbors}), skipping this hint");
                             break;
                         }
                     }
                 }
-                puzzleIsUniquelySolvable = puzzleIsUniquelySolvable && uniquelySolvable;
             }
+        }
 
-            UpdateFullCanvas(canvas, cellData, cellSize);
-            ExportPuzzle(bitmap, filename: "crossword_unique_step_0.png");
+        /// <summary>
+        /// Steps down the requiredNumNeighbors level to a lower level when hint creation fails.
+        /// Used for fallback when no valid hint positions are found for the current requiredNumNeighbors.
+        /// </summary>
+        /// <param name="requiredNumNeighbors">The current requiredNumNeighbors that failed.</param>
+        /// <returns>
+        /// An integer representing the next lower requiredNumNeighbors, or the same requiredNumNeighbors if already at minimum.
+        /// </returns>
+        private static int StepDownRequiredNumNeighbors(int requiredNumNeighbors)
+        {
+            return Math.Max(requiredNumNeighbors - 1, 1);
+        }
 
-            // Pre-filter words by length for faster lookup - created once outside the loop
-            var wordsByLength = new Dictionary<int, List<int>>();
-            for (int i = 0; i < inputNames.Count; i++)
+        /// <summary>
+        /// Pre-calculates coordinate positions for all slots to avoid repeated calculations during solving.
+        /// Each slot represents a word placement position with its direction, and this function converts
+        /// the slot information into arrays of specific grid coordinates for efficient access.
+        /// </summary>
+        /// <param name="slots">List of slots containing row, column, direction, length, and phrase index information.</param>
+        /// <returns>
+        /// Dictionary mapping slot indices to arrays of coordinate positions.
+        /// Each array contains the (row, col) coordinates for every character position in that slot.
+        /// </returns>
+        /// <remarks>
+        /// This optimization reduces redundant coordinate calculations during the solving process.
+        /// For horizontal slots (drawRight=true), coordinates increment column-wise.
+        /// For vertical slots (drawRight=false), coordinates increment row-wise.
+        /// </remarks>
+        private static Dictionary<int, (int r, int c)[]> PreCalculateSlotPositions(List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots)
+        {
+            var slotPositions = new Dictionary<int, (int r, int c)[]>();
+            for (int slotIndex = 0; slotIndex < slots.Count; slotIndex++)
             {
-                int len = inputNames[i].Length;
-                if (!wordsByLength.ContainsKey(len))
-                    wordsByLength[len] = new List<int>();
-                wordsByLength[len].Add(i);
+                var slot = slots[slotIndex];
+                var positions = new (int r, int c)[slot.length];
+                for (int i = 0; i < slot.length; i++)
+                {
+                    positions[i] = (slot.row + (slot.drawRight ? 0 : i), slot.col + (slot.drawRight ? i : 0));
+                }
+                slotPositions[slotIndex] = positions;
             }
+            return slotPositions;
+        }
 
-            // Pre-build slots once outside the loop to avoid rebuilding on every makePuzzleUnique call
+        /// <summary>
+        /// Creates slots by scanning the grid for unique phrases and extracting their placement information.
+        /// Each slot represents a word placement position with its starting coordinates, direction, length, and phrase index.
+        /// </summary>
+        /// <param name="cellData">The 2D grid containing placed words with phrase information</param>
+        /// <param name="inputNames">List of input words used to determine phrase lengths</param>
+        /// <returns>
+        /// List of slots containing:
+        /// - row: Starting row position of the word
+        /// - col: Starting column position of the word  
+        /// - drawRight: Direction (true for horizontal, false for vertical)
+        /// - length: Length of the word in characters
+        /// - phraseIndex: Index into inputNames for the specific word
+        /// </returns>
+        private static List<(int row, int col, bool drawRight, int length, int phraseIndex)> CreateSlots(
+            List<List<CellData>> cellData,
+            List<string> inputNames)
+        {
             List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots = new();
             var processedPhrases = new HashSet<int>();
-
             // Loop through cellData to find unique phrases and build slots
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -252,67 +363,52 @@ namespace CodeDuku
                 }
             }
             Console.WriteLine($"[CreatePuzzle] Pre-built {slots.Count} slots");
-
-            // Pre-calculate all coordinate positions for each slot to avoid repeated calculations
-            var slotPositions = new Dictionary<int, (int r, int c)[]>();
-            for (int slotIndex = 0; slotIndex < slots.Count; slotIndex++)
-            {
-                var slot = slots[slotIndex];
-                var positions = new (int r, int c)[slot.length];
-                for (int i = 0; i < slot.length; i++)
-                {
-                    positions[i] = (slot.row + (slot.drawRight ? 0 : i), slot.col + (slot.drawRight ? i : 0));
-                }
-                slotPositions[slotIndex] = positions;
-            }
-
-            puzzleIsUniquelySolvable = false;
-            int j = 1;
-            while (!puzzleIsUniquelySolvable)
-            {
-                var returnValue = makePuzzleUnique(ref cellData, inputNames, canvas, cellSize, HintsAdded, wordsByLength, languageDicts, slots, slotPositions);
-                puzzleIsUniquelySolvable = returnValue.isUnique;
-                var bestIndex = returnValue.bestHint.bestIndex;
-                var bestColor = returnValue.bestHint.color;
-                if (!puzzleIsUniquelySolvable)
-                {
-                    ColorHint(cellData, canvas, colors, bestColor, new CellData(row: bestIndex.row, col: bestIndex.col), cellSize, languageDicts, ref HintsAdded, inputNames, 1);
-                    UpdateFullCanvas(canvas, cellData, cellSize);
-                    Console.WriteLine($"[Solver] Exported alternate solution to crossword_unique_step_{j}.png");
-                    ExportPuzzle(bitmap, filename: $"crossword_unique_step_{j}.png");
-                    j++;
-                }
-            }
-
-            UpdateFullCanvas(canvas, cellData, cellSize);
-
-            string solutionStatus = puzzleIsUniquelySolvable ? "unique" : "non-unique";
-            Console.WriteLine($"[Result] Final puzzle is {solutionStatus}");
-
-            return cellData;
+            return slots;
         }
 
         /// <summary>
-        /// Steps down the requiredNumNeighbors level to a lower level when hint creation fails.
-        /// Used for fallback when no valid hint positions are found for the current requiredNumNeighbors.
+        /// Pre-filters words by length for faster lookup during solving.
+        /// Creates a dictionary mapping word lengths to lists of word indices for efficient access.
         /// </summary>
-        /// <param name="requiredNumNeighbors">The current requiredNumNeighbors that failed.</param>
+        /// <param name="inputNames">List of input words to categorize by length</param>
         /// <returns>
-        /// An integer representing the next lower requiredNumNeighbors, or the same requiredNumNeighbors if already at minimum.
-        /// requiredNumNeighbors hierarchy: 6 -> 5 -> 4 -> 3 -> 2 -> 1
+        /// Dictionary where:
+        /// - Key: Word length (number of characters)
+        /// - Value: List of indices into inputNames for words of that length
         /// </returns>
-        private static int StepDownRequiredNumNeighbors(int requiredNumNeighbors)
+        private static Dictionary<int, List<int>> CreateWordsByLength(List<string> inputNames)
         {
-            return requiredNumNeighbors switch
+            var wordsByLength = new Dictionary<int, List<int>>();
+            for (int i = 0; i < inputNames.Count; i++)
             {
-                6 => 5,
-                5 => 4,
-                4 => 3,
-                3 => 2,
-                2 => 1,
-                1 => 1, // Already at minimum requiredNumNeighbors
-                _ => 1 // Default fallback for unknown requiredNumNeighbors
-            };
+                int len = inputNames[i].Length;
+                if (!wordsByLength.ContainsKey(len))
+                    wordsByLength[len] = new List<int>();
+                wordsByLength[len].Add(i);
+            }
+            return wordsByLength;
+        }
+
+        /// <summary>
+        /// Creates a weighted pool for randomly selecting the number of neighbors based on provided weights.
+        /// Each key in the weights dictionary is added to the pool a number of times proportional to its weight.
+        /// </summary>
+        /// <param name="requiredNumNeighborsWeights">Dictionary mapping neighbor counts to their selection weights (must sum to 1.0)</param>
+        /// <returns>List of integers representing the weighted pool for random selection</returns>
+        private static List<int> CreateWeightedPool(Dictionary<int, float> requiredNumNeighborsWeights)
+        {
+            List<int> weightedPool = new();
+
+            foreach (var pair in requiredNumNeighborsWeights)
+            {
+                int count = (int)(pair.Value * 10);
+                for (int i = 0; i < count; i++)
+                {
+                    weightedPool.Add(pair.Key);
+                }
+            }
+
+            return weightedPool;
         }
 
         /// <summary>
@@ -552,6 +648,13 @@ namespace CodeDuku
             colors.Add("red_blue_green", new SKColor(197, 197, 197));
         }
 
+        /// <summary>
+        /// Initializes the canvas by drawing a grid of empty cells with black borders.
+        /// </summary>
+        /// <param name="nrows">Number of rows in the grid.</param>
+        /// <param name="ncols">Number of columns in the grid.</param>
+        /// <param name="canvas">The SKCanvas to draw on.</param>
+        /// <param name="cellSize">Size in pixels of each grid cell.</param>
         static void InitializeCanvas(int nrows, int ncols, SKCanvas canvas, int cellSize)
         {
             var borderPaint = new SKPaint { Color = SKColors.Black, StrokeWidth = 2, IsStroke = true };
@@ -807,7 +910,7 @@ namespace CodeDuku
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
             using var stream = File.OpenWrite(filename);
             data.SaveTo(stream);
-            Console.WriteLine("Crossword saved as " + filename);
+            Console.WriteLine("[Export] Crossword saved as " + filename);
         }
 
         /// <summary>
@@ -1032,7 +1135,31 @@ namespace CodeDuku
             return true;
         }
 
-        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, int numHints, ref bool uniquelySolvable, List<string> inputList, int requiredNumNeighbors)
+        /// <summary>
+        /// Creates and places a hint on the crossword grid at a valid position that meets the specified neighbor requirements.
+        /// Finds empty cells that have the exact number of valid neighboring letters, prioritizes positions with light gray neighbors
+        /// for maximum information value, and selects the position farthest from existing hints for optimal distribution.
+        /// </summary>
+        /// <param name="cellData">The 2D crossword grid containing placed words and existing hints</param>
+        /// <param name="canvas">The SKCanvas for drawing the hint on the visual representation</param>
+        /// <param name="colors">Dictionary mapping color names to SKColor values for hint visualization</param>
+        /// <param name="cellSize">Size in pixels of each grid cell for proper rendering</param>
+        /// <param name="languageDicts">Dictionary containing character-to-integer mappings for hint value calculation</param>
+        /// <param name="hintsAdded">Reference to the list of already placed hints, updated when a new hint is added</param>
+        /// <param name="inputList">List of input words used for phrase index reference</param>
+        /// <param name="requiredNumNeighbors">Required number of valid neighbor letters (1-6) for hint placement</param>
+        /// <returns>
+        /// True if a hint was successfully created and placed; false if no valid position was found
+        /// that meets the neighbor requirements and spacing criteria.
+        /// </returns>
+        /// <remarks>
+        /// The function uses spatial distribution to ensure hints are well-spaced across the grid.
+        /// Hint colors (red, blue, green) are randomly selected and determine which neighbors are considered:
+        /// - Red hints: consider cross (orthogonal) neighbors only
+        /// - Blue hints: consider diagonal neighbors only  
+        /// - Green hints: consider both diagonal and cross neighbors
+        /// </remarks>
+        private static bool CreateHint(List<List<CellData>> cellData, SKCanvas canvas, Dictionary<string, SKColor> colors, int cellSize, Dictionary<string, object> languageDicts, ref List<PlacedHint> hintsAdded, List<string> inputList, int requiredNumNeighbors)
         {
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
@@ -1106,44 +1233,47 @@ namespace CodeDuku
             // Find the hint position that is farthest from all existing hints
             CellData bestHint = possibleHints[0];
             double maxMinDistance = 0;
-
-            foreach (var candidate in possibleHints)
+            if (hintsAdded.Count > 0)
             {
-                double minDistanceToExistingHints = double.MaxValue;
+                foreach (var candidate in possibleHints)
+                {
+                    double minDistanceToExistingHints = double.MaxValue;
 
-                // Calculate minimum distance to any existing hint
-                foreach (var existingHint in hintsAdded)
-                {
-                    double distance = Math.Sqrt(
-                        Math.Pow(candidate.Row - existingHint.Row, 2) +
-                        Math.Pow(candidate.Col - existingHint.Col, 2)
-                    );
-                    minDistanceToExistingHints = Math.Min(minDistanceToExistingHints, distance);
-                }
-
-                // If no existing hints, use the first candidate or randomize
-                if (hintsAdded.Count == 0)
-                {
-                    minDistanceToExistingHints = double.MaxValue;
-                }
-
-                // Select candidate with maximum minimum distance (farthest from any existing hints)
-                if (minDistanceToExistingHints > maxMinDistance)
-                {
-                    maxMinDistance = minDistanceToExistingHints;
-                    bestHint = candidate;
-                }
-                else if (Math.Abs(minDistanceToExistingHints - maxMinDistance) < 0.001) // Equal distances
-                {
-                    // Break ties randomly
-                    if (rand.Next(2) == 0)
+                    // Calculate minimum distance to any existing hint
+                    foreach (var existingHint in hintsAdded)
                     {
+                        double distance = Math.Sqrt(
+                            Math.Pow(candidate.Row - existingHint.Row, 2) +
+                            Math.Pow(candidate.Col - existingHint.Col, 2)
+                        );
+                        minDistanceToExistingHints = Math.Min(minDistanceToExistingHints, distance);
+                    }
+
+                    // If no existing hints, use the first candidate or randomize
+                    if (hintsAdded.Count == 0)
+                    {
+                        minDistanceToExistingHints = double.MaxValue;
+                    }
+
+                    // Select candidate with maximum minimum distance (farthest from any existing hints)
+                    if (minDistanceToExistingHints > maxMinDistance)
+                    {
+                        maxMinDistance = minDistanceToExistingHints;
                         bestHint = candidate;
+                    }
+                    else if (Math.Abs(minDistanceToExistingHints - maxMinDistance) < 0.001) // Equal distances
+                    {
+                        // Break ties randomly
+                        if (rand.Next(2) == 0)
+                        {
+                            bestHint = candidate;
+                        }
                     }
                 }
             }
 
-            Console.WriteLine($"[Hint] Placing hint at ({bestHint.Row},{bestHint.Col}) with min distance {maxMinDistance:F2} from existing hints");
+
+            Console.WriteLine($"[Hint] Placing hint at ({bestHint.Row},{bestHint.Col}) with min distance " + (maxMinDistance == 0 ? "infinity" : maxMinDistance.ToString("F2")) + " from existing hints");
 
             return ColorHint(cellData, canvas, colors, randomColor, bestHint, cellSize, languageDicts, ref hintsAdded, inputList, requiredNumNeighbors);
         }
@@ -1339,9 +1469,9 @@ namespace CodeDuku
         // This does currently work
         // it outputs all found solutions to their own files
         // Returns true if no alternate solutions found, false if alternate solutions found
-        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) makePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts, List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots, Dictionary<int, (int r, int c)[]> slotPositions)
+        private static (bool isUnique, ((int row, int col) bestIndex, string color) bestHint) TryMakePuzzleUnique(ref List<List<CellData>> cellData, List<string> inputNames, SKCanvas canvas, int cellSize, List<PlacedHint> hintsAdded, Dictionary<int, List<int>> wordsByLength, Dictionary<string, object> languageDicts, List<(int row, int col, bool drawRight, int length, int phraseIndex)> slots, Dictionary<int, (int r, int c)[]> slotPositions)
         {
-            Console.WriteLine("Beginning: makePuzzleUnique");
+            //Console.WriteLine("Beginning: makePuzzleUnique");
             int nrows = cellData.Count;
             int ncols = cellData[0].Count;
             var charToInt = (Dictionary<char, int>)languageDicts["charToInt"];
